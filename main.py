@@ -1,28 +1,26 @@
-from fastapi import FastAPI, Request
-import httpx
+import logging
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import os
-
-app = FastAPI()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-@app.post("/webhook")
-async def webhook_listener(request: Request):
-    data = await request.json()
-    message = "🚨 Neuer Buy erkannt!\n"
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
-    if "type" in data:
-        message += f"Typ: {data['type']}\n"
-    if "signature" in data:
-        message += f"Signature: {data['signature'][:8]}..."
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="👋 BuyBot läuft!")
 
-    await send_telegram_message(message)
-    return {"status": "ok"}
+def main():
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-async def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text}
-    async with httpx.AsyncClient() as client:
-        await client.post(url, data=payload)
+    start_handler = CommandHandler("start", start)
+    application.add_handler(start_handler)
+
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
 

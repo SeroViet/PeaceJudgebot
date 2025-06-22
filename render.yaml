@@ -4,9 +4,10 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
     envVars:
       - key: BOT_TOKEN
         value: 7660919491:AAE8RxjaGw1LGlwJke_he8_0NPAEx3A0YYQ
       - key: CHAT_ID
         value: -1002720789255
+

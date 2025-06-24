@@ -2,11 +2,5 @@ services:
   - type: web
     name: pje-buybot
     env: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
-    envVars:
-      - key: TELEGRAM_TOKEN
-        value: 7660919491:AAE8RxjaGw1LG1wJke_he8_oNPAEx3A0YYQ
-      - key: CHAT_ID
-        value: -1007220789255
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python main.py"

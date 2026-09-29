@@ -21,7 +21,7 @@ from sqlalchemy import Engine, delete, select
 from fussball.betting.combos import Combo, build_combos
 from fussball.betting.value import Tip, load_betting_config, select_singles
 from fussball.cli import current_season_code
-from fussball.config import get_settings, load_leagues
+from fussball.config import CONFIG_DIR, get_settings, load_leagues
 from fussball.data import football_data
 from fussball.data.db import session_scope
 from fussball.data.point_in_time import latest_odds_as_of
@@ -74,8 +74,10 @@ def _deep_update(base: dict, upd: dict) -> None:
 def model_summary() -> dict:
     """Ergebnis des letzten Backtests (Gewichte, Qualität je Liga)."""
     path = get_settings().storage_dir / "backtest_summary.json"
-    if not path.exists():
-        return {}
+    if not path.exists():  # mitgelieferter Stand (Backtest 2020–2026), bis ein eigener Lauf existiert
+        path = CONFIG_DIR / "backtest_summary.json"
+        if not path.exists():
+            return {}
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -358,9 +360,15 @@ def _leg_won(m: Match, market: str, line: float, selection: str) -> bool | None:
     return None
 
 
-def settle_bets(engine: Engine) -> int:
-    """Rechnet offene Wetten auf beendete Spiele ab und berechnet den CLV."""
+def settle_bets(engine: Engine, details: list | None = None) -> int:
+    """Rechnet offene Wetten auf beendete Spiele ab und berechnet den CLV.
+    `details` (optional) wird mit einer Kurzbeschreibung je abgerechneter Wette gefüllt."""
     settled = 0
+
+    def note(b: Bet, m: Match | None, text: str) -> None:
+        if details is not None:
+            details.append({"bet_id": b.id, "status": b.status, "pnl": b.pnl, "stake": b.stake,
+                            "odds": b.odds_taken, "clv": b.clv, "text": text})
     with session_scope(engine) as s:
         open_bets = s.scalars(select(Bet).where(Bet.status == "open").order_by(Bet.id)).all()
         groups: dict[str, list[Bet]] = {}
@@ -375,6 +383,8 @@ def settle_bets(engine: Engine) -> int:
             b.pnl = round(b.stake * (b.odds_taken - 1), 2) if won else -b.stake
             b.clv = closing_value(s, b)
             settled += 1
+            m = s.get(Match, b.match_id)
+            note(b, m, f"{_match_name(s, m)} {m.ft_home}:{m.ft_away} · {LABELS_ALL.get(b.selection, b.selection)}")
         for legs in groups.values():
             legs = sorted(legs, key=lambda b: b.id)
             results = [_leg_won(s.get(Match, b.match_id), b.market, b.line, b.selection) for b in legs]
@@ -387,7 +397,16 @@ def settle_bets(engine: Engine) -> int:
                 head.pnl = round(head.stake * (head.odds_taken - 1), 2) if won else -head.stake
                 head.status = "won" if won else "lost"
                 settled += 1
+                note(head, None, f"Kombi mit {len(legs)} Tipps")
     return settled
+
+
+LABELS_ALL = {"H": "Heimsieg", "D": "Unentschieden", "A": "Auswärtssieg", "O": "Über 2.5", "U": "Unter 2.5"}
+
+
+def _match_name(session, m: Match) -> str:
+    home, away = session.get(Team, m.home_team_id), session.get(Team, m.away_team_id)
+    return f"{home.name} – {away.name}"
 
 
 def closing_value(session, bet: Bet) -> float | None:

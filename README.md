@@ -117,6 +117,8 @@ App unter „Mehr → Modell“.
 
 ## Deployment
 
+**Schritt-für-Schritt-Anleitung: [DEPLOY.md](DEPLOY.md)** (Render, Telegram, Passwort).
+
 **VPS (empfohlen):** `.env` anlegen, `DOMAIN=tipps.example.ch docker compose up -d`.
 Caddy holt automatisch ein HTTPS-Zertifikat; der `backup`-Dienst sichert die DB täglich.
 
@@ -147,5 +149,5 @@ fussball/models/   Dixon-Coles, ELO, Märkte, Devig, Pooling, Backtest
 fussball/betting/  Value, Kelly, Kombis
 fussball/app/      Web-App, Login, Telegram, Jobs, Templates
 fussball/service.py  Prognosen, Tipps, Wett-Abrechnung
-tests/             pytest (52 Tests)
+tests/             pytest (64 Tests)
 ```

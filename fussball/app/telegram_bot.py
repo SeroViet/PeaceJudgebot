@@ -108,6 +108,12 @@ def build(engine) -> Application | None:
             "Als TELEGRAM_OWNER_ID eintragen, damit der Bot nur dir antwortet.")
 
     async def cmd_start(update: Update, _ctx):
+        if owner is None or update.effective_user.id != owner:
+            await update.effective_message.reply_text(
+                f"👋 Deine Telegram-ID: {update.effective_user.id}\n"
+                "Trage sie beim Server als TELEGRAM_OWNER_ID ein und starte den Dienst neu. "
+                "Danach antworte ich nur noch dir.")
+            return
         await reply(update, "👋 PeaceJudge ist bereit.\n/heute – Tipps\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/bilanz – Bilanz\n/gesetzt Nr Einsatz Quote – Wette erfassen\n/update – neu berechnen")
 
@@ -153,7 +159,8 @@ def build(engine) -> Application | None:
         await reply(update, "Fertig.\n" + "\n".join(changes))
 
     app.add_handler(CommandHandler("id", cmd_id))
-    for name, fn in (("start", cmd_start), ("heute", cmd_today), ("kombi", cmd_combo), ("spiel", cmd_match),
+    app.add_handler(CommandHandler("start", cmd_start))
+    for name, fn in (("heute", cmd_today), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     return app

@@ -25,5 +25,13 @@ services:
         sync: false
       - key: SESSION_SECRET
         sync: false
+      - key: ODDS_API_KEY
+        sync: false
       - key: API_FOOTBALL_KEY
         sync: false
+      - key: DAILY_REPORT_TIME
+        value: "09:00"
+      - key: REMINDER_MINUTES
+        value: "60"
+      - key: ODDS_API_INTERVAL_HOURS
+        value: "24"

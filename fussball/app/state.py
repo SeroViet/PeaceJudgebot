@@ -78,7 +78,9 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3) -> dict:
         if fetch:
             info["update"] = service.update_data(engine)
             _status["last_update"] = utcnow().isoformat()
-        info["settled"] = service.settle_bets(engine)
+        details: list = []
+        info["settled"] = service.settle_bets(engine, details)
+        info["settled_details"] = details
         old = load_plan()
         plan = service.daily_plan(engine, days=days)
         data = serialize_plan(plan)
@@ -95,6 +97,34 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3) -> dict:
     finally:
         _status["running"] = False
         _lock.release()
+
+
+def needs_bootstrap(engine: Engine, min_matches: int = 1000) -> bool:
+    from sqlalchemy import func, select
+
+    from fussball.data.db import session_scope
+    from fussball.data.schema import Match
+
+    with session_scope(engine) as s:
+        return s.execute(select(func.count(Match.id))).scalar_one() < min_matches
+
+
+def bootstrap(engine: Engine, seasons_back: int = 3) -> list[dict]:
+    """Erster Start auf einem neuen Server: Historie laden (laufende + 3 Vorsaisons,
+    Hauptligen und 2. Ligen für Aufsteiger). Dauert einige Minuten."""
+    from fussball.cli import current_season_code
+    from fussball.config import load_leagues
+    from fussball.data import football_data
+    from fussball.models.backtest import RELATED_LEAGUES
+
+    leagues = load_leagues()
+    main = service.enabled_leagues(engine)
+    codes = sorted({c for m in main for c in [m, *RELATED_LEAGUES.get(m, [])] if c in leagues})
+    start = int(current_season_code()[:2])
+    seasons = [f"{(start - i) % 100:02d}{(start - i + 1) % 100:02d}" for i in range(seasons_back, -1, -1)]
+    log.info("Erststart: lade %s für %s", seasons, codes)
+    return football_data.run_import(engine, [leagues[c] for c in codes], seasons,
+                                    get_settings().storage_dir / "raw" / "football-data")
 
 
 def diff_plans(old: dict, new: dict) -> list[str]:

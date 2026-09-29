@@ -1,0 +1,30 @@
+# Einsatz- und Tipp-Regeln. Alle Werte sind in der Web-App unter "Einstellungen" änderbar.
+currency: CHF
+bankroll: 500.0
+
+singles:
+  min_edge: 0.05          # Edge = p × Quote − 1
+  min_prob: 0.0
+  max_odds: 6.0
+  kelly_fraction: 0.25    # Viertel-Kelly
+  max_stake_pct: 0.02     # max. 2 % der Bankroll pro Tipp
+  daily_limit_pct: 0.06
+  weekly_limit_pct: 0.15
+
+combos:
+  min_legs: 4
+  max_legs: 6
+  leg_min_prob: 0.60
+  leg_min_edge: 0.03
+  leg_min_odds: 1.50      # z. B. Mindestquote für KombiBoost
+  min_total_prob: 0.05
+  kelly_fraction: 0.10    # deutlich kleiner als bei Einzeltipps
+  max_stake_pct: 0.01
+  # Bonus des Anbieters je Anzahl Tipps (Gewinn-Multiplikator auf den Nettogewinn).
+  # Konkrete Werte beim Anbieter prüfen und hier eintragen, z. B. {4: 0.05, 5: 0.10}.
+  boost: {}
+
+# Ligen, in denen das Modell im Backtest den Markt nicht schlägt, werden automatisch
+# gesperrt (siehe `python -m fussball backtest`). Hier manuell erzwingen:
+force_enabled_leagues: []
+force_disabled_leagues: []

@@ -1,20 +1,11 @@
-import logging
-import os
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+"""Startpunkt für Render/Docker: Web-App + Telegram-Bot + Scheduler in einem Prozess.
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
+Lokal:  python main.py        (Port aus $PORT, Standard 8000)
+"""
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
+import sys
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Hey! Der PeaceJudgeBot ist online!")
+from fussball.cli import main
 
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    print("✅ Bot läuft...")
-    app.run_polling()
+    sys.exit(main(["serve"]))

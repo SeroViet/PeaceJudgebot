@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex gap-2 text-sm"><a class="btn" href="/einstellungen">Einstellungen</a><a class="btn-ghost" href="/modell">Modell</a><a class="btn-ghost" href="/status">Status</a></div>
+{% if saved %}<div class="card p-3 text-sm pos">Gespeichert. Die Tipps werden bei der nächsten Aktualisierung neu berechnet.</div>{% endif %}
+<form method="post" action="/einstellungen" class="space-y-4">
+  <div class="card p-4 space-y-3">
+    <h2 class="font-bold">Bankroll & Einzeltipps</h2>
+    <div class="grid grid-cols-2 gap-3 text-xs muted">
+      <label>Bankroll ({{ cfg.currency }})<input name="bankroll" type="number" step="10" value="{{ cfg.bankroll }}"></label>
+      <label>Mindest-Edge (%)<input name="min_edge" type="number" step="0.5" value="{{ cfg.singles.min_edge * 100 }}"></label>
+      <label>Mindestwahrscheinlichkeit (%)<input name="min_prob" type="number" step="1" value="{{ cfg.singles.min_prob * 100 }}"></label>
+      <label>Maximale Quote<input name="max_odds" type="number" step="0.1" value="{{ cfg.singles.max_odds }}"></label>
+      <label>Kelly-Anteil (0.25 = Viertel)<input name="kelly_fraction" type="number" step="0.05" value="{{ cfg.singles.kelly_fraction }}"></label>
+      <label>Max. Einsatz pro Tipp (% Bankroll)<input name="max_stake_pct" type="number" step="0.5" value="{{ cfg.singles.max_stake_pct * 100 }}"></label>
+      <label>Tageslimit (% Bankroll)<input name="daily_limit_pct" type="number" step="1" value="{{ cfg.singles.daily_limit_pct * 100 }}"></label>
+      <label>Wochenlimit (% Bankroll)<input name="weekly_limit_pct" type="number" step="1" value="{{ cfg.singles.weekly_limit_pct * 100 }}"></label>
+    </div>
+  </div>
+  <div class="card p-4 space-y-3">
+    <h2 class="font-bold">Kombis</h2>
+    <div class="grid grid-cols-2 gap-3 text-xs muted">
+      <label>Min. Tipps<input name="min_legs" type="number" value="{{ cfg.combos.min_legs }}"></label>
+      <label>Max. Tipps<input name="max_legs" type="number" value="{{ cfg.combos.max_legs }}"></label>
+      <label>Min. Wahrscheinlichkeit pro Tipp (%)<input name="leg_min_prob" type="number" step="1" value="{{ cfg.combos.leg_min_prob * 100 }}"></label>
+      <label>Min. Edge pro Tipp (%)<input name="leg_min_edge" type="number" step="0.5" value="{{ cfg.combos.leg_min_edge * 100 }}"></label>
+      <label>Mindestquote pro Tipp<input name="leg_min_odds" type="number" step="0.05" value="{{ cfg.combos.leg_min_odds }}"></label>
+    </div>
+  </div>
+  <div class="card p-4 space-y-2">
+    <h2 class="font-bold">Ligen</h2>
+    <div class="grid grid-cols-2 gap-1 text-sm">
+      {% for code, l in leagues.items() %}
+      <label class="flex items-center gap-2"><input type="checkbox" name="leagues" value="{{ code }}" class="w-4" {{ 'checked' if code in enabled }}> {{ l.name }}</label>
+      {% endfor %}
+    </div>
+    <label class="flex items-center gap-2 text-xs warn mt-2"><input type="checkbox" name="ignore_backtest" class="w-4"
+      {{ 'checked' if '*' in cfg.force_enabled_leagues }}> Tipps auch aus Ligen zeigen, in denen das Modell den Markt im Backtest nicht schlägt (nicht empfohlen)</label>
+  </div>
+  <button class="btn w-full">Speichern</button>
+</form>
+{% endblock %}

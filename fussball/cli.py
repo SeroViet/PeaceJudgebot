@@ -79,6 +79,86 @@ def _cmd_status(args) -> int:
     return 0
 
 
+def _cmd_backtest(args) -> int:
+    import json
+    from concurrent.futures import ProcessPoolExecutor
+
+    from fussball.models import backtest as bt
+    from fussball.service import np_default
+
+    engine = make_engine()
+    leagues = load_leagues()
+    codes = args.leagues or [c for c, cfg in leagues.items() if cfg.get("enabled")]
+    frame = bt.load_frame(engine)
+    cfg = bt.ModelConfig(**bt.BEST_CONFIG)
+    rules = bt.BetRules(min_edge=args.min_edge, price_col=args.price)
+    with ProcessPoolExecutor(max_workers=args.workers) as ex:
+        preds = dict(zip(codes, ex.map(bt.walk_forward, [frame] * len(codes), codes, [cfg] * len(codes))))
+    summary = {"generated_at": bt.utcnow_iso(), "model_config": bt.BEST_CONFIG, "price": args.price,
+               "min_edge": args.min_edge, "leagues": {}}
+    for code, p in preds.items():
+        s = bt.league_summary(p, rules)
+        summary["leagues"][code] = s
+        summary["test_seasons"] = s.pop("test_seasons")
+        print(f"{code:<4} LL Modell {s['ll_model']:.4f} Markt {s['ll_market']:.4f} Kombi {s['ll_blend']:.4f} | "
+              f"Ü/U Markt {s['ou_market']:.4f} Kombi {s['ou_blend']:.4f} | Wetten {s['bets']:>4} "
+              f"ROI {s['roi']:+.1%} CLV {s['clv']:+.2%} t={s['t']:+.2f} | "
+              f"{'AKTIV' if s['beats_market'] else 'gesperrt'}")
+    path = get_settings().storage_dir / "backtest_summary.json"
+    path.write_text(json.dumps(summary, default=np_default, indent=2), encoding="utf-8")
+    print(f"Gespeichert: {path}")
+    return 0
+
+
+def _cmd_refresh(args) -> int:
+    from fussball.app import state
+
+    engine = make_engine()
+    init_db(engine)
+    info = state.refresh(engine, fetch=not args.no_fetch, days=args.days)
+    plan = state.load_plan()
+    print(f"{len(plan['forecasts'])} Spiele, {len(plan['singles'])} Einzeltipps, {len(plan['combos'])} Kombis")
+    for t in plan["singles"]:
+        print(f"  #{t['id']} {t['match']}: {t['label']} @ {t['odds']:.2f} (min {t['min_odds']:.2f}) "
+              f"p={t['prob']:.1%} edge={t['edge']:+.1%} Einsatz {t['stake']:.2f}")
+    for c in plan["combos"]:
+        print(f"  {c['id']} {c['variant']}: {len(c['legs'])} Tipps, Quote {c['odds']:.2f}, p={c['prob']:.1%}, EV {c['ev']:+.1%}")
+    for line in info.get("changes", []):
+        print("  " + line)
+    return 0
+
+
+def _cmd_set_password(args) -> int:
+    import getpass
+    import secrets
+
+    from fussball.app.auth import hash_password, new_totp_secret
+
+    pw = getpass.getpass("Neues Passwort (mind. 12 Zeichen): ")
+    if len(pw) < 12 or pw != getpass.getpass("Wiederholen: "):
+        print("Passwörter stimmen nicht überein oder sind zu kurz.")
+        return 2
+    secret, uri = new_totp_secret()
+    print("\nDiese Werte als Umgebungsvariablen / Secrets beim Hoster eintragen (NICHT committen):\n")
+    print(f"APP_PASSWORD_HASH={hash_password(pw)}")
+    print(f"APP_TOTP_SECRET={secret}")
+    print(f"SESSION_SECRET={secrets.token_urlsafe(32)}")
+    print(f"\n2FA: In Google Authenticator/1Password manuell den Schlüssel {secret} eintragen oder diese URI nutzen:\n{uri}")
+    return 0
+
+
+def _cmd_serve(args) -> int:
+    import os
+
+    import uvicorn
+
+    from fussball.app.web import create_app
+
+    port = int(args.port or os.getenv("PORT", "8000"))
+    uvicorn.run(create_app(), host=args.host, port=port, proxy_headers=True, forwarded_allow_ips="*")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m fussball", description="Fussball-Prognose-KI")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -93,6 +173,25 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=_cmd_import_fd)
 
     sub.add_parser("status", help="Datenbestand anzeigen").set_defaults(func=_cmd_status)
+
+    p = sub.add_parser("backtest", help="Walk-Forward-Backtest; legt Gewichte und freigegebene Ligen fest")
+    p.add_argument("--leagues", nargs="+")
+    p.add_argument("--min-edge", type=float, default=0.05)
+    p.add_argument("--price", choices=["avg", "max"], default="avg")
+    p.add_argument("--workers", type=int, default=4)
+    p.set_defaults(func=_cmd_backtest)
+
+    p = sub.add_parser("refresh", help="Daten laden, Wetten abrechnen, Tipps berechnen")
+    p.add_argument("--no-fetch", action="store_true", help="ohne Download, nur neu rechnen")
+    p.add_argument("--days", type=int, default=3)
+    p.set_defaults(func=_cmd_refresh)
+
+    sub.add_parser("set-password", help="Login-Passwort und 2FA einrichten").set_defaults(func=_cmd_set_password)
+
+    p = sub.add_parser("serve", help="Web-App + Telegram-Bot + Scheduler starten")
+    p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("--port", type=int)
+    p.set_defaults(func=_cmd_serve)
 
     args = parser.parse_args(argv)
     logging.basicConfig(

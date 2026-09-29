@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex gap-2 text-sm"><a class="btn-ghost" href="/einstellungen">Einstellungen</a><a class="btn" href="/modell">Modell</a><a class="btn-ghost" href="/status">Status</a></div>
+<h1 class="text-lg font-bold">Modellqualität (Walk-Forward-Backtest)</h1>
+{% if not summary %}
+<div class="card p-4 text-sm muted">Noch kein Backtest gelaufen: <code>python -m fussball backtest</code></div>
+{% else %}
+<p class="text-xs muted">Stand {{ summary.generated_at | local }} · Testsaisons {{ summary.test_seasons | join(', ') }} ·
+  Wettquote: {{ summary.price }} · Edge-Schwelle {{ summary.min_edge | pct(0) }}</p>
+{% for code, s in summary.leagues.items() %}
+<div class="card p-4 text-sm">
+  <div class="flex justify-between"><b>{{ leagues[code].name if code in leagues else code }}</b>
+    <span class="{{ 'pos' if s.beats_market else 'warn' }}">{{ '✅ Tipps aktiv' if s.beats_market else '⛔ gesperrt' }}</span></div>
+  <table class="w-full tabular text-xs mt-2">
+    <tr class="muted text-left"><th></th><th>Modell</th><th>Markt</th><th>Kombination</th></tr>
+    <tr><td>Log Loss 1X2 ↓</td><td>{{ '%.4f' | format(s.ll_model) }}</td><td>{{ '%.4f' | format(s.ll_market) }}</td><td><b>{{ '%.4f' | format(s.ll_blend) }}</b></td></tr>
+    <tr><td>Log Loss Ü/U ↓</td><td>–</td><td>{{ '%.4f' | format(s.ou_market) }}</td><td><b>{{ '%.4f' | format(s.ou_blend) }}</b></td></tr>
+  </table>
+  <div class="text-xs mt-2 tabular">Backtest-Wetten: {{ s.bets }} · ROI <b class="{{ 'pos' if s.roi > 0 else 'neg' }}">{{ s.roi | pct }}</b>
+    · Ø CLV {{ s.clv | pct }} · t-Wert {{ '%.2f' | format(s.t) }}</div>
+  <div class="text-[11px] muted mt-1">Gewichte: Modell {{ s.w_dc }}, ELO {{ s.w_elo }}, Markt {{ '%.1f' | format(1 - s.w_dc - s.w_elo) }} · Ü/U Modell {{ s.w_ou }}</div>
+</div>
+{% endfor %}
+<p class="text-xs muted">Eine Liga wird nur freigegeben, wenn die Kombination aus Modell und Markt im Backtest einen niedrigeren
+  Log Loss als der Markt allein hatte UND die Backtest-Wetten positiven CLV zeigten. Kleinere Log-Loss-Werte sind besser.</p>
+{% endif %}
+{% endblock %}

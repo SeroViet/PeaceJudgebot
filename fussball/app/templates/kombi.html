@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-lg font-bold">Kombis</h1>
+{% if not plan.combos %}
+<div class="card p-4 text-sm muted">Heute erfüllt keine Kombi die Regeln. Das ist Absicht: Kombis ohne eigenen Value pro Tipp
+  verlieren langfristig, weil sich die Buchmacher-Marge multipliziert.</div>
+{% endif %}
+{% for c in plan.combos %}
+<div id="{{ c.id }}" class="card p-4 space-y-3">
+  <div class="flex justify-between items-baseline">
+    <h2 class="font-bold">{{ c.id }} · {{ c.variant }}</h2>
+    <span class="tabular text-lg font-bold">{{ c.odds | odds }}</span>
+  </div>
+  <div class="grid grid-cols-2 gap-2 text-xs tabular">
+    <div><span class="muted">Trefferchance</span> <b>{{ c.prob | pct }}</b></div>
+    <div><span class="muted">Erwartungswert</span> <b class="pos">{{ c.ev | pct }}</b> ({{ (c.ev * c.stake) | money(plan.currency) }})</div>
+    <div><span class="muted">Empf. Einsatz</span> <b>{{ c.stake | money(plan.currency) }}</b></div>
+    <div><span class="muted">Kumulierte Marge</span> <b>{{ c.margin | pct }}</b></div>
+    <div class="col-span-2 warn">5 Kombis in Folge verloren: {{ c.streak5 | pct(0) }} · 10 in Folge: {{ c.streak10 | pct(0) }}</div>
+  </div>
+  <table class="w-full text-sm">
+    <tr class="text-xs muted text-left"><th>Spiel</th><th>Tipp</th><th class="text-right">Min.-Quote</th></tr>
+    {% for l in c.legs %}
+    <tr class="border-t border-[#1f2a37]">
+      <td><div>{{ l.match }}</div><div class="text-[11px] muted">{{ l.comp }} · {{ l.kickoff | local }}</div></td>
+      <td>{{ l.label }}<div class="text-[11px] muted">{{ l.prob | pct }} · Ø {{ l.odds | odds }}</div></td>
+      <td class="text-right tabular font-bold">{{ l.min_odds | odds }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="text-[11px] muted">Liegt eine Quote bei deinem Anbieter unter der Mindestquote, diesen Tipp nicht spielen.</p>
+  <form method="post" action="/wetten/neu" class="grid grid-cols-3 gap-2 items-end">
+    <input type="hidden" name="tip_id" value="{{ c.id }}">
+    <label class="text-xs muted">Einsatz<input name="stake" type="number" step="0.5" value="{{ c.stake }}"></label>
+    <label class="text-xs muted">Gesamtquote<input name="odds" type="number" step="0.01" value="{{ '%.2f' | format(c.odds) }}"></label>
+    <button class="btn">Gesetzt</button>
+  </form>
+</div>
+{% endfor %}
+{% endblock %}

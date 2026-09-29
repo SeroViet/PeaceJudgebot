@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 
 SOURCE = "football-data"
 BASE_URL = "https://www.football-data.co.uk/mmz4281/{season}/{code}.csv"
+FIXTURES_URL = "https://www.football-data.co.uk/fixtures.csv"
 UK = ZoneInfo("Europe/London")
 DEFAULT_KICKOFF = time(15, 0)
 RESULT_DELAY = timedelta(hours=2, minutes=15)
@@ -140,7 +141,9 @@ def read_csv(content: bytes) -> pd.DataFrame:
     return df.dropna(subset=["HomeTeam", "AwayTeam", "Date"])
 
 
-def parse_season(df: pd.DataFrame) -> ParsedSeason:
+def parse_season(df: pd.DataFrame, odds_known_at: datetime | None = None) -> ParsedSeason:
+    """`odds_known_at`: tatsächlicher Abrufzeitpunkt (bei Live-Fixtures), sonst
+    wird der Sammelzeitpunkt von football-data konservativ geschätzt."""
     out = ParsedSeason()
     cols = list(df.columns)
     odds_cols = []
@@ -183,7 +186,8 @@ def parse_season(df: pd.DataFrame) -> ParsedSeason:
             match[dst] = val if dst in FLOAT_STATS or val is None else int(val)
         out.matches.append(match)
 
-        pre_known = pre_closing_known_at(kickoff)
+        pre_known = (min(odds_known_at, kickoff) if odds_known_at is not None
+                     else pre_closing_known_at(kickoff))
         rows = []
         for col, bk, market, selection, closing in odds_cols:
             price = _num(row.get(col))
@@ -213,19 +217,29 @@ def parse_season(df: pd.DataFrame) -> ParsedSeason:
     return out
 
 
+def _http_get(url: str) -> bytes:
+    session = requests.Session()
+    retry = Retry(total=4, backoff_factor=2, status_forcelist=(429, 500, 502, 503, 504))
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    resp = session.get(url, timeout=30)
+    resp.raise_for_status()
+    return resp.content
+
+
 def download(code: str, season: str, cache_dir: Path, refresh: bool = False) -> bytes:
     """Lädt eine Saison-CSV. Abgeschlossene Saisons werden aus dem Cache gelesen."""
     path = cache_dir / season / f"{code}.csv"
     if path.exists() and not refresh:
         return path.read_bytes()
-    session = requests.Session()
-    retry = Retry(total=4, backoff_factor=2, status_forcelist=(429, 500, 502, 503, 504))
-    session.mount("https://", HTTPAdapter(max_retries=retry))
-    resp = session.get(BASE_URL.format(season=season, code=code), timeout=30)
-    resp.raise_for_status()
+    content = _http_get(BASE_URL.format(season=season, code=code))
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(resp.content)
-    return resp.content
+    path.write_bytes(content)
+    return content
+
+
+def download_fixtures() -> bytes:
+    """Kommende Spiele mit Vorab-Quoten (Update i. d. R. dienstags und freitags)."""
+    return _http_get(FIXTURES_URL)
 
 
 def _team_ids(session: Session, names: set[str], country: str | None) -> dict[str, int]:
@@ -279,9 +293,23 @@ def ensure_competition(session: Session, league: dict) -> int:
     return session.execute(select(Competition.id).where(Competition.code == league["code"])).scalar_one()
 
 
+def import_fixtures(session: Session, leagues: dict[str, dict], season_code: str, content: bytes,
+                    fetched_at: datetime | None = None) -> dict[str, dict[str, int]]:
+    """Importiert kommende Spiele aller konfigurierten Ligen aus fixtures.csv."""
+    df = read_csv(content)
+    fetched_at = fetched_at or utcnow()
+    return {div: import_frame(session, leagues[div], season_code, group, odds_known_at=fetched_at)
+            for div, group in df.groupby("Div") if div in leagues}
+
+
 def import_season(session: Session, league: dict, season_code: str, content: bytes) -> dict[str, int]:
     """Schreibt eine Saison in die DB. Idempotent (Upsert auf natürlichen Schlüsseln)."""
-    parsed = parse_season(read_csv(content))
+    return import_frame(session, league, season_code, read_csv(content))
+
+
+def import_frame(session: Session, league: dict, season_code: str, df: pd.DataFrame,
+                 odds_known_at: datetime | None = None) -> dict[str, int]:
+    parsed = parse_season(df, odds_known_at=odds_known_at)
     comp_id = ensure_competition(session, league)
     season = season_label(season_code)
     teams = _team_ids(

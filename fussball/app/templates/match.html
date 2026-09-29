@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ f.home }} – {{ f.away }}{% endblock %}
+{% block content %}
+<div class="card p-4">
+  <div class="text-xs muted">{{ f.comp_name }} · {{ f.kickoff_utc | local }}</div>
+  <h1 class="text-xl font-bold mt-1">{{ f.home }} – {{ f.away }}</h1>
+  <div class="text-sm muted mt-1">Erwartete Tore {{ '%.2f' | format(f.lam) }} : {{ '%.2f' | format(f.mu) }}</div>
+  {% if not f.league_ok %}<div class="text-xs warn mt-2">⚠️ Liga im Backtest ohne Vorteil gegenüber dem Markt – nur zur Info.</div>{% endif %}
+</div>
+
+<div class="card p-4">
+  <h2 class="font-bold mb-2">1X2</h2>
+  <table class="w-full text-sm tabular">
+    <tr class="muted text-xs text-left"><th></th><th>Prognose</th><th>Modell</th><th>Markt</th><th>faire Q.</th><th>Ø Quote</th><th>Edge</th></tr>
+    {% for k, name in [('H', f.home), ('D', 'Unentschieden'), ('A', f.away)] %}
+    {% set p = f.probs_1x2[k] %}{% set q = f.odds.avg.get(k) %}
+    <tr class="border-t border-[#1f2a37]">
+      <td>{{ name }}</td><td><b>{{ p | pct }}</b></td><td class="muted">{{ f.model_1x2[k] | pct }}</td>
+      <td class="muted">{{ f.market_1x2[k] | pct if f.market_1x2 else '–' }}</td>
+      <td>{{ (1 / p) | odds }}</td><td>{{ q | odds }}</td>
+      <td class="{{ 'pos' if q and p * q > 1.05 else 'muted' }}">{{ (p * q - 1) | pct if q else '–' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card p-4">
+  <h2 class="font-bold mb-2">Über/Unter 2.5</h2>
+  <table class="w-full text-sm tabular">
+    <tr class="muted text-xs text-left"><th></th><th>Prognose</th><th>Markt</th><th>faire Q.</th><th>Ø Quote</th><th>Edge</th></tr>
+    {% for k, name in [('O', 'Über 2.5'), ('U', 'Unter 2.5')] %}
+    {% set p = f.probs_ou[k] %}{% set q = f.odds.avg.get(k) %}
+    <tr class="border-t border-[#1f2a37]">
+      <td>{{ name }}</td><td><b>{{ p | pct }}</b></td><td class="muted">{{ f.market_ou[k] | pct if f.market_ou else '–' }}</td>
+      <td>{{ (1 / p) | odds }}</td><td>{{ q | odds }}</td>
+      <td class="{{ 'pos' if q and p * q > 1.05 else 'muted' }}">{{ (p * q - 1) | pct if q else '–' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card p-4">
+  <h2 class="font-bold mb-2">Weitere Märkte (reines Modell)</h2>
+  <div class="grid grid-cols-2 gap-2 text-sm tabular">
+    <div>Doppelte Chance 1X: <b>{{ f.other_markets.DC['1X'] | pct }}</b></div>
+    <div>Doppelte Chance X2: <b>{{ f.other_markets.DC['X2'] | pct }}</b></div>
+    <div>Draw No Bet 1: <b>{{ f.other_markets.DNB.H | pct }}</b></div>
+    <div>Beide treffen: <b>{{ f.other_markets.BTTS.Y | pct }}</b></div>
+    <div>Über 1.5: <b>{{ f.other_markets['OU1.5'].O | pct }}</b></div>
+    <div>Über 3.5: <b>{{ f.other_markets['OU3.5'].O | pct }}</b></div>
+  </div>
+  <div class="text-xs muted mt-3">Wahrscheinlichste Ergebnisse:
+    {% for s, p in f.top_scores %}<span class="chip ml-1">{{ s }} {{ p | pct(0) }}</span>{% endfor %}</div>
+</div>
+
+<div class="card p-4">
+  <h2 class="font-bold mb-2">Wichtigste Faktoren</h2>
+  <ul class="text-sm space-y-1 list-disc pl-5">{% for x in f.factors %}<li>{{ x }}</li>{% endfor %}</ul>
+  <p class="text-xs muted mt-2">Ausfälle/Sperren und Aufstellungen fliessen ein, sobald Phase 2 (API-Football PRO) aktiv ist.</p>
+</div>
+
+{% for t in tips %}
+<form method="post" action="/wetten/neu" class="card p-4 space-y-2">
+  <h2 class="font-bold">Tipp #{{ t.id }}: {{ t.label }}</h2>
+  <div class="text-sm">Nur setzen, wenn deine Quote mindestens <b>{{ t.min_odds | odds }}</b> ist.</div>
+  <input type="hidden" name="tip_id" value="{{ t.id }}">
+  <div class="grid grid-cols-3 gap-2">
+    <label class="text-xs muted">Einsatz<input name="stake" type="number" step="0.5" value="{{ t.stake }}"></label>
+    <label class="text-xs muted">Deine Quote<input name="odds" type="number" step="0.01" value="{{ t.odds }}"></label>
+    <label class="text-xs muted">Anbieter<input name="bookmaker" value="Sporttip"></label>
+  </div>
+  <button class="btn w-full">Als gesetzt erfassen</button>
+</form>
+{% endfor %}
+{% endblock %}

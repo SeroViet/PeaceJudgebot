@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-lg font-bold">Bilanz</h1>
+<section class="grid grid-cols-2 gap-3 text-sm tabular">
+  <div class="card p-3"><div class="text-xs muted">Bankroll</div><b>{{ stats.bankroll | money(plan.currency) }}</b></div>
+  <div class="card p-3"><div class="text-xs muted">Gewinn/Verlust</div><b class="{{ 'pos' if stats.pnl > 0 else 'neg' if stats.pnl < 0 }}">{{ stats.pnl | money(plan.currency) }}</b></div>
+  <div class="card p-3"><div class="text-xs muted">ROI</div><b>{{ stats.roi | pct }}</b></div>
+  <div class="card p-3"><div class="text-xs muted">Trefferquote</div><b>{{ stats.hit | pct }}</b></div>
+  <div class="card p-3"><div class="text-xs muted">Ø CLV</div><b>{{ stats.clv | pct }}</b></div>
+  <div class="card p-3"><div class="text-xs muted">Abgerechnet · offen</div><b>{{ stats.n }} · {{ stats.open }}</b></div>
+</section>
+
+<div class="card p-4">
+  <h2 class="font-bold mb-2">Verlauf (kumuliert je Monat)</h2>
+  {% set pts = stats.monthly %}
+  {% if pts | length > 0 %}
+    {% set vals = pts | map(attribute=1) | list %}
+    {% set lo = [vals | min, 0] | min %}{% set hi = [vals | max, 0] | max %}{% set span = (hi - lo) or 1 %}
+    <svg viewBox="0 0 300 120" class="w-full h-40">
+      <line x1="0" x2="300" y1="{{ 110 - (0 - lo) / span * 100 }}" y2="{{ 110 - (0 - lo) / span * 100 }}" stroke="#2d3a4a" stroke-dasharray="4 4"/>
+      <polyline fill="none" stroke="#60a5fa" stroke-width="2.5" stroke-linejoin="round"
+        points="{% for m, v in pts %}{{ (loop.index0 / ((pts | length - 1) or 1)) * 290 + 5 }},{{ 110 - (v - lo) / span * 100 }} {% endfor %}"/>
+      {% for m, v in pts %}<circle cx="{{ (loop.index0 / ((pts | length - 1) or 1)) * 290 + 5 }}" cy="{{ 110 - (v - lo) / span * 100 }}" r="3" fill="#60a5fa"><title>{{ m }}: {{ v }}</title></circle>{% endfor %}
+    </svg>
+    <div class="flex justify-between text-[11px] muted">{% for m, v in pts %}<span>{{ m }}</span>{% endfor %}</div>
+  {% else %}<p class="text-sm muted">Noch keine abgerechneten Wetten.</p>{% endif %}
+</div>
+
+<div class="card p-4">
+  <h2 class="font-bold mb-2">Nach Wettart</h2>
+  <table class="w-full text-sm tabular">
+    <tr class="text-xs muted text-left"><th>Art</th><th>Anzahl</th><th>P/L</th><th>ROI</th></tr>
+    {% for t, v in stats.by_type.items() %}
+    <tr class="border-t border-[#1f2a37]"><td>{{ {'single': 'Einzeltipps', 'combo': 'Kombis', 'system': 'Systemwetten'}.get(t, t) }}</td>
+      <td>{{ v.n }}</td><td class="{{ 'pos' if v.pnl > 0 else 'neg' }}">{{ v.pnl | money(plan.currency) }}</td><td>{{ v.roi | pct }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">–</td></tr>{% endfor %}
+  </table>
+  <p class="text-xs muted mt-2">CLV (Closing Line Value) ist der beste Frühindikator: Liegt er dauerhaft über 0, schlägst du den Markt,
+    auch wenn die Bilanz kurzfristig schwankt.</p>
+</div>
+{% endblock %}

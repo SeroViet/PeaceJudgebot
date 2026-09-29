@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-lg font-bold">Alle Spiele der nächsten Tage</h1>
+{% for f in plan.forecasts %}
+<a href="/spiel/{{ f.match_id }}" class="card p-3 block">
+  <div class="flex justify-between text-xs muted"><span>{{ f.comp_name }} · {{ f.kickoff_utc | local }}</span>
+    {% if not f.league_ok %}<span class="warn">nur Info</span>{% endif %}</div>
+  <div class="font-semibold">{{ f.home }} – {{ f.away }}</div>
+  <div class="grid grid-cols-5 gap-1 text-xs tabular mt-1 text-center">
+    {% for k in ['H', 'D', 'A'] %}<div class="chip">{{ k | sel }} {{ f.probs_1x2[k] | pct(0) }}</div>{% endfor %}
+    <div class="chip">Ü2.5 {{ f.probs_ou.O | pct(0) }}</div>
+    <div class="chip">{{ '%.1f' | format(f.lam) }}:{{ '%.1f' | format(f.mu) }}</div>
+  </div>
+</a>
+{% else %}
+<div class="card p-4 text-sm muted">Keine Spiele mit Quoten in den nächsten Tagen. football-data.co.uk stellt die Wochenend-Spiele
+  meist freitags bereit, Spiele unter der Woche dienstags.</div>
+{% endfor %}
+{% endblock %}

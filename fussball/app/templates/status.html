@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex gap-2 text-sm"><a class="btn-ghost" href="/einstellungen">Einstellungen</a><a class="btn-ghost" href="/modell">Modell</a><a class="btn" href="/status">Status</a></div>
+<div class="card p-4 text-sm space-y-1">
+  <div>Prognosen berechnet: <b>{{ plan.generated_at | local if plan.generated_at else '–' }}</b></div>
+  <div>Letzter Datenabruf: <b>{{ status.last_update | local if status.last_update else '–' }}</b></div>
+  <div>Läuft gerade: <b>{{ 'ja' if status.running else 'nein' }}</b></div>
+  {% if status.last_error %}<div class="neg">Letzter Fehler: {{ status.last_error }}</div>{% endif %}
+  <form method="post" action="/aktualisieren" class="pt-2"><button class="btn" {{ 'disabled' if status.running }}>Jetzt aktualisieren</button></form>
+</div>
+<div class="card p-4">
+  <h2 class="font-bold mb-2">Datenimporte</h2>
+  <table class="w-full text-xs tabular">
+    {% for l in logs %}
+    <tr class="border-t border-[#1f2a37]"><td>{{ l.at | local }}</td><td>{{ l.resource }}</td>
+      <td class="{{ 'pos' if l.status == 'ok' else 'neg' }}">{{ l.status }}</td><td>{{ l.rows }}</td><td class="muted">{{ l.message or '' }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

@@ -304,3 +304,13 @@ class IngestLog(Base):
     status: Mapped[str] = mapped_column(String(12), default="running")  # running | ok | error
     rows: Mapped[int] = mapped_column(Integer, default=0)
     message: Mapped[str | None] = mapped_column(Text)
+
+
+class AppSetting(Base):
+    """Vom Benutzer in der App geänderte Einstellungen (überschreiben config/*.yaml)."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict | list | float | str | None] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

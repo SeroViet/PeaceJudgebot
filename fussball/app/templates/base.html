@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="de" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b0f14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/icon.svg">
+  <link rel="apple-touch-icon" href="/static/icon.svg">
+  <title>{% block title %}PeaceJudge{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0b0f14; color: #e6edf3; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+    .card { background: #121821; border: 1px solid #1f2a37; border-radius: 14px; }
+    .muted { color: #8b98a8; }
+    .pos { color: #3fb950; } .neg { color: #f85149; } .warn { color: #d29922; }
+    .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #1f2a37; color: #c9d4df; }
+    .btn { background: #2563eb; color: white; border-radius: 10px; padding: 8px 14px; font-weight: 600; }
+    .btn-ghost { background: #1f2a37; color: #e6edf3; border-radius: 10px; padding: 8px 14px; }
+    input, select { background: #0b0f14; border: 1px solid #2d3a4a; border-radius: 10px; padding: 8px 10px; color: #e6edf3; width: 100%; }
+    table td, table th { padding: 6px 8px; }
+    nav a.active { color: #60a5fa; }
+    .tabular { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body class="min-h-screen pb-24">
+  <header class="sticky top-0 z-10 bg-[#0b0f14]/95 backdrop-blur border-b border-[#1f2a37]">
+    <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+      <a href="/" class="font-bold tracking-tight">⚽ PeaceJudge</a>
+      <div class="flex items-center gap-3 text-xs muted">
+        {% if status.running %}<span class="warn">⟳ aktualisiert …</span>
+        {% elif plan.generated_at %}<span>Stand {{ plan.generated_at | local }}</span>{% endif %}
+        <form method="post" action="/logout"><button class="underline">Logout</button></form>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-4 py-4 space-y-4">
+    {% block content %}{% endblock %}
+  </main>
+
+  <nav class="fixed bottom-0 inset-x-0 bg-[#0b0f14]/95 backdrop-blur border-t border-[#1f2a37]" style="padding-bottom: env(safe-area-inset-bottom)">
+    <div class="max-w-3xl mx-auto grid grid-cols-6 text-center text-[11px] py-2">
+      <a href="/" class="{{ 'active' if active == 'dashboard' }}">🏠<br>Tipps</a>
+      <a href="/kombi" class="{{ 'active' if active == 'kombi' }}">🧩<br>Kombi</a>
+      <a href="/alle" class="{{ 'active' if active == 'alle' }}">📋<br>Spiele</a>
+      <a href="/wetten" class="{{ 'active' if active == 'wetten' }}">🎟️<br>Wetten</a>
+      <a href="/bilanz" class="{{ 'active' if active == 'bilanz' }}">📈<br>Bilanz</a>
+      <a href="/einstellungen" class="{{ 'active' if active in ('einstellungen', 'modell', 'status') }}">⚙️<br>Mehr</a>
+    </div>
+  </nav>
+  <script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");</script>
+</body>
+</html>

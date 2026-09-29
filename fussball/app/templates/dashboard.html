@@ -54,6 +54,27 @@
 
 <section>
   <div class="flex items-baseline justify-between mb-2">
+    <h2 class="text-lg font-bold">🏆 Tageskombi</h2>
+    <span class="text-xs muted">5er/6er · alle Spiele am selben Tag</span>
+  </div>
+  <p class="text-[11px] muted mb-2">Backtest 530 Spieltage: Einzeltipps 82.6 % richtig · 5er aufgegangen 46 % · 6er 41 %.</p>
+  {% for c in (plan.day_combos or [])[:4] %}
+  <div class="card p-3 mb-2">
+    <div class="flex justify-between"><b>{{ c.id }} · {{ c.size }}er · {{ c.legs[0].kickoff | local }}</b>
+      <span class="tabular">faire Quote <b>{{ c.fair_odds | odds }}</b></span></div>
+    <div class="text-xs muted">Trefferchance gesamt <b class="pos">{{ c.prob | pct(0) }}</b> · nur spielen, wenn dein Anbieter ≥ {{ c.fair_odds | odds }} zahlt</div>
+    <table class="w-full text-sm mt-2">
+      {% for l in c.legs %}<tr class="border-t"><td class="text-xs muted">{{ l.kickoff | local }}</td>
+        <td>{{ l.match }}<div class="text-xs"><b>{{ l.label }}</b></div></td><td class="text-right tabular">{{ l.prob | pct(0) }}</td></tr>{% endfor %}
+    </table>
+  </div>
+  {% else %}
+  <div class="card p-4 text-sm muted">Noch keine Tageskombi (zu wenige Spiele mit Pinnacle-Quoten an einem Tag).</div>
+  {% endfor %}
+</section>
+
+<section>
+  <div class="flex items-baseline justify-between mb-2">
     <h2 class="text-lg font-bold">🎯 Sicher-Tipps</h2>
     <span class="text-xs muted">Trefferwahrscheinlichkeit 70–90 %</span>
   </div>

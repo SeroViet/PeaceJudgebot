@@ -54,6 +54,7 @@ def serialize_plan(plan: service.DailyPlan) -> dict:
     return {
         "generated_at": utcnow().isoformat(),
         "safe": safe,
+        "day_combos": [{**c, "id": f"T{i}"} for i, c in enumerate(plan.day_combos, start=1)],
         "forecasts": [f.to_dict() for f in plan.forecasts],
         "singles": singles,
         "combos": combos,

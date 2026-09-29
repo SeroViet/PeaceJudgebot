@@ -103,6 +103,7 @@ async def _daily_loop():
         plan = state.load_plan()
         await telegram_bot.notify(_bot, "☀️ <b>Tipps des Tages</b>\n\n" + telegram_bot.format_singles(plan)
                                   + "\n\n" + telegram_bot.format_combos(plan))
+        await telegram_bot.notify(_bot, telegram_bot.format_day_combos(plan, max_days=1))
         await telegram_bot.notify(_bot, telegram_bot.format_safe(plan))
         await asyncio.sleep(60)
 

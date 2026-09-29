@@ -50,3 +50,21 @@ def test_safe_tips_respect_range_and_families():
     assert 1 <= len(tips) <= 2
     assert all(0.70 <= t["prob"] <= 0.90 for t in tips)
     assert len({t["market"][:2] for t in tips}) == len(tips)  # verschiedene Familien
+
+
+def test_day_combos_same_day_one_tip_per_match():
+    from fussball.service import day_combos
+
+    fs = []
+    for i, hour in enumerate([11, 13, 14, 16, 18, 19, 20]):
+        lam, mu = fit_rates({"H": 0.6, "D": 0.23, "A": 0.17}, 2.5, 0.55)
+        fs.append(MatchForecast(i, "D1", "BL", datetime(2026, 10, 10, hour, 0), f"H{i}", f"A{i}", lam, mu,
+                                {}, {}, {}, None, None, 0.0, {}, implied=implied_markets(lam, mu)))
+    fs.append(MatchForecast(99, "D1", "BL", datetime(2026, 10, 11, 13, 0), "X", "Y", 1.5, 1.0, {}, {}, {},
+                            None, None, 0.0, {}, implied=implied_markets(1.5, 1.0)))
+    combos = day_combos(fs, sizes=(5, 6))
+    assert {c["day"] for c in combos} == {"2026-10-10"}  # nur 1 Spiel am 11.10.
+    for c in combos:
+        assert len({l["match_id"] for l in c["legs"]}) == c["size"]
+        assert all(0.75 <= l["prob"] <= 0.88 and l["market"] != "OU0.5" for l in c["legs"])
+        assert c["prob"] == pytest.approx(__import__("math").prod(l["prob"] for l in c["legs"]))

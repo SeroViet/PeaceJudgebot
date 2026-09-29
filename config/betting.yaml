@@ -28,6 +28,12 @@ safe:
   max_prob: 0.90
   per_match: 2
 
+# Tageskombi: 5er/6er, alle Spiele am selben Tag, pro Spiel der sicherste Tipp aus allen Märkten.
+day_combo:
+  sizes: [5, 6]
+  min_prob: 0.75
+  max_prob: 0.88
+
 combos:
   min_legs: 4
   max_legs: 6

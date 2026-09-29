@@ -317,6 +317,51 @@ def safe_tips(forecasts: list[MatchForecast], min_prob: float = 0.70, max_prob: 
     return out
 
 
+COMBO_MARKETS = ("1X2", "DC", "OU1.5", "OU2.5", "OU3.5", "BTTS")
+
+
+def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob: float,
+                       markets: tuple[str, ...] = COMBO_MARKETS) -> list[dict]:
+    """Pro Spiel genau ein Tipp: der wahrscheinlichste aus den erlaubten Märkten im Bereich.
+    Triviale Märkte (Über 0.5 Tore, Quote ~1.05) sind bewusst ausgeschlossen."""
+    from fussball.models.implied import label
+
+    out = []
+    for f in forecasts:
+        cands = [(p, m, sel) for m, sels in (f.implied or {}).items() if m in markets for sel, p in sels.items()
+                 if min_prob <= p <= max_prob]
+        if not cands:
+            continue
+        p, market, sel = max(cands)
+        out.append({"match_id": f.match_id, "match": f"{f.home} – {f.away}", "kickoff": f.kickoff_utc.isoformat(),
+                    "comp": f.comp, "market": market, "selection": sel, "label": label(market, sel, f.home, f.away),
+                    "prob": p, "fair_odds": 1 / p})
+    return out
+
+
+def day_combos(forecasts: list[MatchForecast], sizes=(5, 6), min_prob: float = 0.75, max_prob: float = 0.88,
+               tz: str = "Europe/Zurich") -> list[dict]:
+    """Tageskombis: alle Spiele am selben Kalendertag, ein Tipp pro Spiel, die sichersten zuerst."""
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo(tz)
+    by_day: dict[str, list[dict]] = {}
+    for t in best_tip_per_match(forecasts, min_prob, max_prob):
+        day = datetime.fromisoformat(t["kickoff"]).replace(tzinfo=ZoneInfo("UTC")).astimezone(zone).date().isoformat()
+        by_day.setdefault(day, []).append(t)
+    out = []
+    for day in sorted(by_day):
+        legs = sorted(by_day[day], key=lambda t: -t["prob"])
+        for n in sizes:
+            if len(legs) < n:
+                continue
+            chosen = sorted(legs[:n], key=lambda t: t["kickoff"])
+            prob = float(np.prod([t["prob"] for t in chosen]))
+            out.append({"day": day, "size": n, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
+                        "leg_min": min(t["prob"] for t in chosen)})
+    return out
+
+
 def split_market(market: str) -> tuple[str, float]:
     """'OU1.5' → ('OU', 1.5), 'HOME0.5' → ('HOME', 0.5), 'DC' → ('DC', 0.0)."""
     for prefix in ("OU", "HOME", "AWAY"):
@@ -377,6 +422,7 @@ class DailyPlan:
     config: dict
     blocked_leagues: list[str]
     safe: list[dict] = field(default_factory=list)
+    day_combos: list[dict] = field(default_factory=list)
 
 
 def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | None = None) -> DailyPlan:
@@ -391,7 +437,9 @@ def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | N
     combos = build_combos(tips, cfg["combos"])
     sc = cfg.get("safe", {})
     safe = safe_tips(forecasts, sc.get("min_prob", 0.70), sc.get("max_prob", 0.90), sc.get("per_match", 2))
-    return DailyPlan(forecasts, singles, combos, cfg, blocked, safe)
+    dc = cfg.get("day_combo", {})
+    days = day_combos(forecasts, tuple(dc.get("sizes", [5, 6])), dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
+    return DailyPlan(forecasts, singles, combos, cfg, blocked, safe, days)
 
 
 def _staked(engine: Engine) -> tuple[float, float]:

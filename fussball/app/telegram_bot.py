@@ -66,6 +66,11 @@ def _find_legs(plan: dict, tip_id: str) -> list[dict] | None:
     if tid.startswith("K"):
         c = next((c for c in plan["combos"] if c["id"] == tid), None)
         return c["legs"] if c else None
+    if tid.startswith("T"):
+        c = next((c for c in plan.get("day_combos", []) if c["id"] == tid), None)
+        if not c:
+            return None
+        return [{**l, "market": split_market(l["market"])[0], "line": split_market(l["market"])[1]} for l in c["legs"]]
     if tid.startswith("S"):
         t = next((t for t in plan.get("safe", []) if t["id"] == tid), None)
         if not t:
@@ -74,6 +79,27 @@ def _find_legs(plan: dict, tip_id: str) -> list[dict] | None:
         return [{**t, "market": market, "line": line}]
     t = next((t for t in plan["singles"] if t["id"] == tip_id), None)
     return [t] if t else None
+
+
+DAY_BT = {"5": "46 % aufgegangen, Ø 4,3 von 5 richtig", "6": "41 % aufgegangen, Ø 5,2 von 6 richtig"}
+
+
+def format_day_combos(plan: dict, max_days: int = 2) -> str:
+    combos = plan.get("day_combos", [])
+    if not combos:
+        return "Keine Tageskombi möglich (zu wenige Spiele mit Pinnacle-Quoten an einem Tag)."
+    days = sorted({c["day"] for c in combos})[:max_days]
+    out = []
+    for day in days:
+        for c in [c for c in combos if c["day"] == day]:
+            d = state.local(c["legs"][0]["kickoff"]).strftime("%a %d.%m.")
+            legs = "\n".join(f"  {i}. {state.local(l['kickoff']).strftime('%H:%M')} {l['match']}\n"
+                              f"     ➡️ <b>{l['label']}</b> ({l['prob']:.0%})" for i, l in enumerate(c["legs"], 1))
+            out.append(f"🎯 <b>{c['id']} · {c['size']}er-Tageskombi {d}</b>\n{legs}\n"
+                       f"Trefferchance gesamt <b>{c['prob']:.0%}</b> · faire Gesamtquote <b>{c['fair_odds']:.2f}</b>\n"
+                       f"Nur spielen, wenn Sporttip ≥ {c['fair_odds']:.2f} zahlt.\n"
+                       f"<i>Backtest {c['size']}er: {DAY_BT.get(str(c['size']), '')}</i>")
+    return "\n\n".join(out)
 
 
 def format_combos(plan: dict) -> str:
@@ -148,6 +174,7 @@ def build(engine) -> Application | None:
                 "Danach antworte ich nur noch dir.")
             return
         await reply(update, "👋 PeaceJudge ist bereit.\n/heute – Tipps\n/kombi – Kombis\n/spiel Team – Prognose\n"
+                            "/tageskombi – 5er/6er-Kombi, alle Spiele am selben Tag\n"
                             "/sicher – Tipps mit hoher Trefferquote (Über/Unter, 1X …)\n"
                             "/bilanz – Bilanz\n/gesetzt Nr Einsatz Quote – Wette erfassen (z. B. /gesetzt S3 10 1.45)\n"
                             "/update – neu berechnen")
@@ -156,6 +183,9 @@ def build(engine) -> Application | None:
         plan = state.load_plan()
         await reply(update, format_singles(plan))
         await reply(update, format_safe(plan))
+
+    async def cmd_day(update: Update, _ctx):
+        await reply(update, format_day_combos(state.load_plan()))
 
     async def cmd_safe(update: Update, _ctx):
         await reply(update, format_safe(state.load_plan(), limit=40))
@@ -193,7 +223,7 @@ def build(engine) -> Application | None:
 
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CommandHandler("start", cmd_start))
-    for name, fn in (("heute", cmd_today), ("sicher", cmd_safe), ("kombi", cmd_combo), ("spiel", cmd_match),
+    for name, fn in (("heute", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     return app

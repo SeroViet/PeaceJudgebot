@@ -24,6 +24,8 @@ Beim ersten Start lädt sie selbst die Historie (ca. 5 Min.) und meldet sich per
 | `ODDS_API_KEY` | Key von the-odds-api.com |
 | `APP_PASSWORD_HASH`, `APP_TOTP_SECRET`, `SESSION_SECRET` | siehe Schritt 3 |
 | `TELEGRAM_OWNER_ID` | siehe Schritt 4 (zuerst leer lassen) |
+| `ANTHROPIC_API_KEY` | für die KI-Agenten (console.anthropic.com), optional |
+| `AGENT_DAILY_BUDGET_USD` | Tageslimit Agenten-Kosten, z. B. `1.5` |
 
 5. **Manual Deploy** → *Deploy latest commit*.
 

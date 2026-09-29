@@ -31,7 +31,8 @@ def test_outcome(market, sel, hg, ag, expected):
 
 def test_labels_like_betting_slip():
     assert label("OU2.5", "U", "A", "B") == "Unter 2.5 Tore"
-    assert label("DC", "1X", "Bayern", "Dortmund") == "Bayern oder Unentschieden (1X)"
+    assert label("DC", "1X", "Bayern", "Dortmund") == "1X (Bayern)"
+    assert label("1X2", "D", "Bayern", "Dortmund") == "X (Unentschieden)"
     assert label("BTTS", "Y", "A", "B") == "Beide Teams treffen: Ja"
 
 

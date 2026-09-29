@@ -86,6 +86,11 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3) -> dict:
         info["settled_details"] = details
         old = load_plan()
         plan = service.daily_plan(engine, days=days)
+        try:
+            info["agent"] = service.apply_agents(engine, plan)
+        except Exception:  # noqa: BLE001 – ohne Agenten weiterarbeiten
+            log.exception("Agenten fehlgeschlagen")
+            info["agent"] = []
         data = serialize_plan(plan)
         path = plan_path()
         path.parent.mkdir(parents=True, exist_ok=True)

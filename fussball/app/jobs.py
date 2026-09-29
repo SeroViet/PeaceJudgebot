@@ -28,6 +28,10 @@ async def start(engine) -> list:
     if _bot is not None:
         await _bot.initialize()
         await _bot.start()
+        try:
+            await telegram_bot.register_commands(_bot)
+        except Exception:  # noqa: BLE001
+            log.exception("Befehlsmenü konnte nicht gesetzt werden")
         # Kurze Long-Polls: robuster hinter Proxys, die lange offene Verbindungen trennen.
         await _bot.updater.start_polling(drop_pending_updates=True, timeout=5, poll_interval=1.0,
                                          error_callback=lambda e: log.warning("Telegram-Polling: %s", e))
@@ -37,7 +41,7 @@ async def start(engine) -> list:
     if os.getenv("DISABLE_SCHEDULER") == "1":
         return []
     return [asyncio.create_task(_refresh_loop(engine)), asyncio.create_task(_daily_loop()),
-            asyncio.create_task(_reminder_loop())]
+            asyncio.create_task(_reminder_loop(engine))]
 
 
 async def stop() -> None:
@@ -72,6 +76,12 @@ async def _refresh_loop(engine):
         try:
             info = await loop.run_in_executor(None, lambda: state.refresh(engine, days=int(os.getenv("TIP_DAYS", "3"))))
             plan = state.load_plan()
+            new_intel = [a for a in info.get("agent", []) if not a.get("cached")]
+            for a in new_intel:
+                await telegram_bot.notify(_bot, a["text"] + ("\n\n🔁 Aus der Tageskombi gestrichen, Ersatz rückt nach."
+                                                            if a.get("removed") else ""))
+            if new_intel and any(a.get("removed") for a in new_intel):
+                await telegram_bot.notify(_bot, telegram_bot.format_day_combos(state.load_plan(), max_days=1))
             if info.get("changes"):
                 await telegram_bot.notify(_bot, "🔔 <b>Tipps geändert</b>\n" + "\n".join(info["changes"])
                                           + "\n\nDetails: /heute")
@@ -123,13 +133,37 @@ def due_reminders(plan: dict, now: datetime, minutes: int, already: set[str]) ->
     return out
 
 
-async def _reminder_loop():
+def due_lineup_checks(plan: dict, now: datetime, minutes: int, already: set[str]) -> list[dict]:
+    """Legs der Tageskombis, deren Anpfiff in ~`minutes` Minuten ist (offizielle Aufstellung prüfen)."""
+    legs = {l["match_id"]: l for c in plan.get("day_combos", []) for l in c["legs"]}
+    out = []
+    for mid, leg in legs.items():
+        kickoff = datetime.fromisoformat(leg["kickoff"])
+        key = f"L{mid}"
+        if key not in already and now + timedelta(minutes=minutes - 10) < kickoff <= now + timedelta(minutes=minutes + 10):
+            out.append(leg)
+    return out
+
+
+async def _reminder_loop(engine=None):
     minutes = int(os.getenv("REMINDER_MINUTES", "60"))
+    lineup_min = int(os.getenv("LINEUP_CHECK_MINUTES", "75"))
+    loop = asyncio.get_running_loop()
     while True:
         try:
-            for key, text in due_reminders(state.load_plan(), utcnow(), minutes, _reminded):
+            plan = state.load_plan()
+            for key, text in due_reminders(plan, utcnow(), minutes, _reminded):
                 _reminded.add(key)
                 await telegram_bot.notify(_bot, text)
+            if engine is not None:
+                from fussball.agents import runner
+
+                for leg in due_lineup_checks(plan, utcnow(), lineup_min, _reminded):
+                    _reminded.add(f"L{leg['match_id']}")
+                    res = await loop.run_in_executor(None, lambda leg=leg: runner.analyze_legs(
+                        engine, [leg], max_age_h=0.3, local_time=state.local))
+                    if res and res[0]["assessment"] in ("vorsicht", "streichen"):
+                        await telegram_bot.notify(_bot, "📋 <b>Aufstellungs-Check vor Anpfiff</b>\n" + res[0]["text"])
         except Exception:  # noqa: BLE001
-            log.exception("Erinnerung fehlgeschlagen")
+            log.exception("Erinnerung/Aufstellungs-Check fehlgeschlagen")
         await asyncio.sleep(300)

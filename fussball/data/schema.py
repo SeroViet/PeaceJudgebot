@@ -314,3 +314,20 @@ class AppSetting(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[dict | list | float | str | None] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AgentReport(Base):
+    """Ergebnis eines Agenten-Laufs (Scout) mit Quellen und Kosten."""
+
+    __tablename__ = "agent_reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id"), index=True)
+    agent: Mapped[str] = mapped_column(String(32), default="scout")
+    model: Mapped[str] = mapped_column(String(64))
+    tip: Mapped[str | None] = mapped_column(Text)
+    assessment: Mapped[str] = mapped_column(String(16))  # bestätigt | vorsicht | streichen
+    lineup_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    data: Mapped[dict] = mapped_column(JSON)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)

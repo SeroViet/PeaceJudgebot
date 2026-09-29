@@ -362,6 +362,42 @@ def day_combos(forecasts: list[MatchForecast], sizes=(5, 6), min_prob: float = 0
     return out
 
 
+def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,
+                 max_rounds: int = 3) -> list[dict]:
+    """Scout-Agent prüft die Legs der nächsten Tageskombi (innerhalb `horizon_h`).
+    Gestrichene Spiele werden ausgeschlossen und die Kombi neu gebaut (nachrücken)."""
+    from fussball.agents import runner
+    from fussball.app.state import local
+
+    now = utcnow()
+    soon = [c for c in plan.day_combos
+            if now < datetime.fromisoformat(c["legs"][0]["kickoff"]) <= now + timedelta(hours=horizon_h)]
+    if not soon:
+        return []
+    day = soon[0]["day"]
+    dc = plan.config.get("day_combo", {})
+    excluded: set[int] = set()
+    results: dict[int, dict] = {}
+    for _ in range(max_rounds):
+        legs = {l["match_id"]: l for c in plan.day_combos if c["day"] == day for l in c["legs"]}
+        todo = [l for mid, l in legs.items() if mid not in results]
+        if not todo:
+            break
+        for r in runner.analyze_legs(engine, todo, client=client, local_time=local):
+            results[r["match_id"]] = r
+        new_excl = {mid for mid, r in results.items() if r["assessment"] == "streichen"} - excluded
+        if not new_excl:
+            break
+        excluded |= new_excl
+        plan.day_combos = day_combos([f for f in plan.forecasts if f.match_id not in excluded],
+                                     tuple(dc.get("sizes", [5, 6])), dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
+    for c in plan.day_combos:
+        for leg in c["legs"]:
+            if leg["match_id"] in results:
+                leg["agent"] = {k: results[leg["match_id"]][k] for k in ("assessment", "reason")}
+    return [{**r, "removed": r["match_id"] in excluded} for r in results.values()]
+
+
 def split_market(market: str) -> tuple[str, float]:
     """'OU1.5' → ('OU', 1.5), 'HOME0.5' → ('HOME', 0.5), 'DC' → ('DC', 0.0)."""
     for prefix in ("OU", "HOME", "AWAY"):

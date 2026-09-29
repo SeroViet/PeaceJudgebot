@@ -9,7 +9,7 @@ import asyncio
 import logging
 import os
 
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, filters
 
@@ -101,8 +101,11 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
     for day in days:
         for c in [c for c in combos if c["day"] == day]:
             d = _fmt_day(c["legs"][0]["kickoff"])
+            icon = {"bestätigt": " ✅", "vorsicht": " ⚠️", "streichen": " ❌"}
             legs = "\n".join(f"  {i}. {state.local(l['kickoff']).strftime('%H:%M')} {l['match']}\n"
-                              f"     ➡️ <b>{l['label']}</b> ({l['prob']:.0%})" for i, l in enumerate(c["legs"], 1))
+                              f"     ➡️ <b>{l['label']}</b> ({l['prob']:.0%})"
+                              f"{icon.get((l.get('agent') or {}).get('assessment'), '')}"
+                              for i, l in enumerate(c["legs"], 1))
             out.append(f"🎯 <b>{c['id']} · {c['size']}er-Tageskombi {d}</b>\n{legs}\n"
                        f"Trefferchance gesamt <b>{c['prob']:.0%}</b> · faire Gesamtquote <b>{c['fair_odds']:.2f}</b>\n"
                        f"Nur spielen, wenn Sporttip ≥ {c['fair_odds']:.2f} zahlt.\n"
@@ -156,6 +159,25 @@ def format_stats(engine) -> str:
     return "\n".join(lines)
 
 
+COMMANDS = [
+    ("tageskombi", "5er/6er-Kombi, alle Spiele am selben Tag"),
+    ("sicher", "Tipps mit hoher Trefferquote"),
+    ("heute", "Value-Tipps und Sicher-Tipps"),
+    ("analyse", "Agenten-Analyse: /analyse Team"),
+    ("spiel", "Prognose zu einem Spiel: /spiel Team"),
+    ("kombi", "Value-Kombis"),
+    ("bilanz", "Gewinn, Verlust, Trefferquote"),
+    ("gesetzt", "Wette erfassen: /gesetzt T1 10 2.10"),
+    ("update", "Daten und Tipps neu berechnen"),
+    ("start", "Hilfe und alle Befehle"),
+]
+
+
+async def register_commands(app: Application) -> None:
+    """Befehlsmenü, das Telegram beim Tippen von "/" anzeigt."""
+    await app.bot.set_my_commands([BotCommand(c, d) for c, d in COMMANDS])
+
+
 def build(engine) -> Application | None:
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
@@ -191,6 +213,31 @@ def build(engine) -> Application | None:
         plan = state.load_plan()
         await reply(update, format_singles(plan))
         await reply(update, format_safe(plan))
+
+    async def cmd_analyse(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        from fussball.agents import runner, scout
+
+        if not ctx.args:
+            await reply(update, "Beispiel: /analyse Bayern")
+            return
+        if scout.make_client() is None:
+            await reply(update, "Die Agenten sind noch nicht aktiv: ANTHROPIC_API_KEY fehlt beim Server.")
+            return
+        q = " ".join(ctx.args).lower()
+        plan = state.load_plan()
+        leg = next((l for c in plan.get("day_combos", []) for l in c["legs"] if q in l["match"].lower()), None) \
+            or next((t for t in plan.get("safe", []) if q in t["match"].lower()), None)
+        if leg is None:
+            f = next((f for f in plan["forecasts"] if q in f["home"].lower() or q in f["away"].lower()), None)
+            if f is None:
+                await reply(update, f"Kein Spiel mit „{q}“ in den nächsten Tagen.")
+                return
+            leg = {"match_id": f["match_id"], "match": f"{f['home']} – {f['away']}", "kickoff": f["kickoff_utc"],
+                   "comp": f["comp"], "label": "allgemeine Analyse"}
+        await reply(update, f"🕵️ Scout recherchiert {leg['match']} … (ca. 1 Minute)")
+        res = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: runner.analyze_legs(engine, [leg], max_age_h=1.0, local_time=state.local))
+        await reply(update, res[0]["text"] if res else "Tagesbudget der Agenten erreicht – morgen wieder.")
 
     async def cmd_day(update: Update, _ctx):
         await reply(update, format_day_combos(state.load_plan()))
@@ -231,7 +278,7 @@ def build(engine) -> Application | None:
 
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CommandHandler("start", cmd_start))
-    for name, fn in (("heute", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("kombi", cmd_combo), ("spiel", cmd_match),
+    for name, fn in (("heute", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     return app

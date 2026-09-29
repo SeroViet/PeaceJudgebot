@@ -1,0 +1,94 @@
+"""Steuert die Agenten: wählt Spiele, liefert Kontext, hält das Tagesbudget ein,
+speichert Berichte und streicht Tipps, die der Scout als zu riskant einstuft."""
+
+from __future__ import annotations
+
+import logging
+import os
+from datetime import datetime, timedelta
+
+from sqlalchemy import Engine, or_, select
+
+from fussball.agents import scout
+from fussball.data.db import session_scope
+from fussball.data.schema import AgentReport, AppSetting, Match, Team, utcnow
+
+log = logging.getLogger(__name__)
+
+
+def daily_budget() -> float:
+    return float(os.getenv("AGENT_DAILY_BUDGET_USD", "1.5"))
+
+
+def spent_today(engine: Engine) -> float:
+    today = utcnow().date()
+    with session_scope(engine) as s:
+        rows = s.scalars(select(AgentReport.cost_usd).where(
+            AgentReport.created_at >= datetime.combine(today, datetime.min.time()))).all()
+    return float(sum(rows))
+
+
+def fatigue_context(engine: Engine, match_id: int) -> str:
+    """Belastung aus unserer Datenbank (Ligaspiele): Ruhetage und Spiele in 14 Tagen."""
+    with session_scope(engine) as s:
+        m = s.get(Match, match_id)
+        lines = []
+        for team_id in (m.home_team_id, m.away_team_id):
+            name = s.get(Team, team_id).name
+            past = s.scalars(select(Match.kickoff_utc).where(
+                or_(Match.home_team_id == team_id, Match.away_team_id == team_id),
+                Match.kickoff_utc < m.kickoff_utc, Match.status == "finished").order_by(Match.kickoff_utc.desc())
+            ).all()
+            last = past[0] if past else None
+            n14 = sum(1 for k in past if k >= m.kickoff_utc - timedelta(days=14))
+            rest = f"{(m.kickoff_utc - last).days} Tage seit letztem Ligaspiel" if last else "letztes Spiel unbekannt"
+            lines.append(f"- {name}: {rest}, {n14} Ligaspiele in 14 Tagen (Europapokal/Pokal nicht erfasst)")
+        return "\n".join(lines)
+
+
+def recent_report(engine: Engine, match_id: int, max_age_h: float) -> AgentReport | None:
+    with session_scope(engine) as s:
+        r = s.scalars(select(AgentReport).where(
+            AgentReport.match_id == match_id, AgentReport.created_at >= utcnow() - timedelta(hours=max_age_h))
+            .order_by(AgentReport.created_at.desc())).first()
+        if r is not None:
+            s.expunge(r)
+        return r
+
+
+def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float = 10.0,
+                 local_time=None) -> list[dict]:
+    """Scout für jede Leg (Spiel + Tipp). Gibt pro Leg {match_id, assessment, text, cached} zurück."""
+    client = client or scout.make_client()
+    if client is None:
+        return []
+    out = []
+    for leg in legs:
+        cached = recent_report(engine, leg["match_id"], max_age_h)
+        if cached is not None:
+            intel = scout.MatchIntel.model_validate(cached.data)
+            out.append({"match_id": leg["match_id"], "assessment": intel.tip_assessment,
+                        "reason": intel.tip_reason, "text": scout.format_intel(leg["match"], leg["label"], intel),
+                        "cached": True})
+            continue
+        if spent_today(engine) >= daily_budget():
+            log.warning("Agenten-Tagesbudget erreicht (%.2f USD)", daily_budget())
+            break
+        kickoff = local_time(leg["kickoff"]) if local_time else leg["kickoff"]
+        try:
+            res = scout.scout_match(client, leg["match"], str(kickoff), leg.get("comp", ""), leg["label"],
+                                    fatigue_context(engine, leg["match_id"]))
+        except Exception as exc:  # noqa: BLE001 – ein Fehler darf die übrigen Spiele nicht stoppen
+            log.exception("Scout fehlgeschlagen für %s", leg["match"])
+            out.append({"match_id": leg["match_id"], "assessment": "fehler", "reason": repr(exc)[:200],
+                        "text": f"⚠️ Analyse für {leg['match']} fehlgeschlagen.", "cached": False})
+            continue
+        with session_scope(engine) as s:
+            s.add(AgentReport(match_id=leg["match_id"], model=res.model, tip=leg["label"],
+                              assessment=res.intel.tip_assessment,
+                              lineup_confirmed=res.intel.home.lineup_confirmed and res.intel.away.lineup_confirmed,
+                              data=res.intel.model_dump(), cost_usd=res.cost_usd))
+        out.append({"match_id": leg["match_id"], "assessment": res.intel.tip_assessment,
+                    "reason": res.intel.tip_reason, "cost": res.cost_usd,
+                    "text": scout.format_intel(leg["match"], leg["label"], res.intel), "cached": False})
+    return out

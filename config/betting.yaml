@@ -19,6 +19,15 @@ singles:
   daily_limit_pct: 0.06
   weekly_limit_pct: 0.15
 
+# "Sicher-Tipps": hohe Trefferwahrscheinlichkeit, alle Märkte (Über/Unter, beide treffen, 1X, …),
+# abgeleitet aus Pinnacle. Historisch (2020–2026, 170 000 Tipps im Bereich 70–90 %):
+# erwartet 78.2 %, getroffen 78.5 %. Hohe Trefferquote heisst NICHT automatisch Gewinn:
+# nur spielen, wenn die Quote beim Anbieter ≥ fairer Quote ist.
+safe:
+  min_prob: 0.70
+  max_prob: 0.90
+  per_match: 2
+
 combos:
   min_legs: 4
   max_legs: 6

@@ -50,8 +50,10 @@ def serialize_plan(plan: service.DailyPlan) -> dict:
                       "min_odds": round(1 / t.prob * (1 + plan.config["combos"]["leg_min_edge"]), 2)}
                      for t in c.legs],
         })  # fmt: skip
+    safe = [{**t, "id": f"S{i}"} for i, t in enumerate(plan.safe, start=1)]
     return {
         "generated_at": utcnow().isoformat(),
+        "safe": safe,
         "forecasts": [f.to_dict() for f in plan.forecasts],
         "singles": singles,
         "combos": combos,

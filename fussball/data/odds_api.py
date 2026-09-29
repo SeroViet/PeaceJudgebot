@@ -130,9 +130,9 @@ def event_rows(event: dict, fetched_at: datetime) -> list[dict]:
                     sel = "H" if o["name"] == home else "A" if o["name"] == away else "D" if o["name"] == "Draw" else None
                     line = 0.0
                     mk = "1X2"
-                elif market["key"] == "totals" and float(o.get("point", 0)) == 2.5:
+                elif market["key"] == "totals" and o.get("point") is not None:
                     sel = "O" if o["name"] == "Over" else "U" if o["name"] == "Under" else None
-                    line, mk = 2.5, "OU"
+                    line, mk = float(o["point"]), "OU"
                 else:
                     continue
                 if sel is None or not o.get("price") or o["price"] <= 1.0:

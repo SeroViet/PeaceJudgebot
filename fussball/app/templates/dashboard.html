@@ -54,6 +54,26 @@
 
 <section>
   <div class="flex items-baseline justify-between mb-2">
+    <h2 class="text-lg font-bold">🎯 Sicher-Tipps</h2>
+    <span class="text-xs muted">Trefferwahrscheinlichkeit 70–90 %</span>
+  </div>
+  <p class="text-[11px] muted mb-2">Aus Pinnacle abgeleitet. Historisch 2020–2026: 78 % erwartet → 78 % getroffen (170 000 Tipps).
+    Gewinn nur, wenn deine Quote ≥ faire Quote ist.</p>
+  {% for t in plan.safe or [] %}
+  <a href="/spiel/{{ t.match_id }}" class="card p-3 block mb-2">
+    <div class="flex justify-between text-xs muted"><span>{{ t.id }} · {{ t.comp }} · {{ t.kickoff | local }}</span>
+      <b class="pos">{{ t.prob | pct(0) }}</b></div>
+    <div class="font-semibold mt-1">{{ t.match }}</div>
+    <div class="flex justify-between items-end mt-1"><div>{{ t.label }}</div>
+      <div class="text-xs tabular"><span class="muted">faire Quote</span> <b>{{ t.fair_odds | odds }}</b></div></div>
+  </a>
+  {% else %}
+  <div class="card p-4 text-sm muted">Noch keine Sicher-Tipps (Pinnacle-Quoten für die nächsten Tage fehlen).</div>
+  {% endfor %}
+</section>
+
+<section>
+  <div class="flex items-baseline justify-between mb-2">
     <h2 class="text-lg font-bold">Kombi-Vorschläge</h2>
     <a href="/kombi" class="text-xs muted underline">Details</a>
   </div>

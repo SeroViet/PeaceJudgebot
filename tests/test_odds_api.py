@@ -52,7 +52,8 @@ def test_event_rows_maps_bookmakers_and_markets():
     rows = oa.event_rows(_event("Augsburg", "Werder Bremen", "2024-08-24T13:30:00Z"), datetime(2024, 8, 23))
     ps = {(r["market"], r["selection"]): r["price"] for r in rows if r["bookmaker"] == "PS"}
     assert ps == {("1X2", "H"): 2.0, ("1X2", "D"): 3.6, ("1X2", "A"): 3.9, ("OU", "O"): 1.9, ("OU", "U"): 1.95}
-    assert not any(r["bookmaker"] == "WH" and r["market"] == "OU" for r in rows)  # nur Linie 2.5
+    wh_ou = [(r["line"], r["selection"]) for r in rows if r["bookmaker"] == "WH" and r["market"] == "OU"]
+    assert wh_ou == [(3.5, "O")]  # alle Linien werden gespeichert (Pinnacle-Hauptlinie ist nicht immer 2.5)
 
 
 def test_import_matches_existing_fixture_and_learns_alias(engine, fixture_bytes, bundesliga):
@@ -68,7 +69,7 @@ def test_import_matches_existing_fixture_and_learns_alias(engine, fixture_bytes,
 
     with session_scope(engine) as s:
         out = oa.import_odds(s, Fake(), ["D1"])
-    assert out["D1"] == 8  # 5 Pinnacle + 3 William Hill
+    assert out["D1"] == 9  # 5 Pinnacle + 3 William Hill 1X2 + 1 William Hill Über 3.5
     with session_scope(engine) as s:
         rows = s.scalars(select(Odds).where(Odds.source == "odds-api")).all()
         m = s.get(Match, rows[0].match_id)

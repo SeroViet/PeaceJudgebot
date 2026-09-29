@@ -191,13 +191,9 @@ def create_app(engine=None, start_background: bool = True) -> FastAPI:
     @app.post("/wetten/neu")
     def add_bet(request: Request, tip_id: str = Form(...), stake: float = Form(...), odds: float = Form(...),
                 bookmaker: str = Form("Sporttip")):
-        plan = state.load_plan()
-        if tip_id.upper().startswith("K"):
-            combo = next((c for c in plan["combos"] if c["id"] == tip_id.upper()), None)
-            legs = combo["legs"] if combo else None
-        else:
-            tip = next((s for s in plan["singles"] if s["id"] == tip_id), None)
-            legs = [tip] if tip else None
+        from fussball.app.telegram_bot import _find_legs
+
+        legs = _find_legs(state.load_plan(), tip_id)
         if not legs:
             return render(request, "message.html", title="Tipp nicht gefunden", text=f"Tipp {tip_id} existiert nicht.")
         service.record_bet(engine, legs, stake, odds, bookmaker)

@@ -168,6 +168,8 @@ class MatchForecast:
     reference: str | None = None  # PS | BFE | Avg (1X2)
     reference_ou: str | None = None  # Referenz für Über/Unter 2.5
     ou_ok: bool = False  # Tipps auf Über/Unter nur mit eigener Referenz
+    implied: dict[str, dict[str, float]] = field(default_factory=dict)  # alle Märkte aus Pinnacle
+    implied_rates: tuple[float, float] | None = None
 
     def fair(self, sel: str) -> float:
         p = self.probs_1x2.get(sel) or self.probs_ou.get(sel)
@@ -245,8 +247,82 @@ def predict_upcoming(engine: Engine, days: int = 4, now: datetime | None = None)
                 reference_ou=r.get("ou_book"), ou_ok=model_ok or (mv_ok and r.get("ou_book") == "PS"),
             ))  # fmt: skip
     forecasts.sort(key=lambda f: f.kickoff_utc)
+    _add_implied(engine, forecasts)
     _store_predictions(engine, forecasts)
     return forecasts
+
+
+def pinnacle_total(session, match_id: int) -> tuple[float, float] | None:
+    """(Linie, faire P(Über)) der jüngsten Pinnacle-Tore-Linie, bevorzugt nahe 2.5."""
+    from fussball.data.schema import Odds
+
+    rows = session.execute(
+        select(Odds.line, Odds.selection, Odds.price, Odds.known_at)
+        .where(Odds.match_id == match_id, Odds.bookmaker == "PS", Odds.market == "OU", Odds.is_closing.is_(False))
+    ).all()
+    by_line: dict[float, dict] = {}
+    for line, sel, price, known in sorted(rows, key=lambda r: r[3]):
+        by_line.setdefault(line, {})[sel] = price
+    full = {ln: v for ln, v in by_line.items() if "O" in v and "U" in v}
+    if not full:
+        return None
+    line = min(full, key=lambda ln: abs(ln - 2.5))
+    return line, fair_probs([full[line]["O"], full[line]["U"]])[0]
+
+
+def _add_implied(engine: Engine, forecasts: list[MatchForecast]) -> None:
+    """Alle Märkte aus Pinnacle ableiten (nur wenn Pinnacle-1X2 vorliegt)."""
+    from fussball.models.implied import fit_rates, implied_markets
+
+    with session_scope(engine) as s:
+        for f in forecasts:
+            if f.reference != "PS" or not f.market_1x2:
+                continue
+            tot = pinnacle_total(s, f.match_id)
+            lam, mu = fit_rates(f.market_1x2, *(tot if tot else (None, None)))
+            f.implied_rates = (lam, mu)
+            f.implied = implied_markets(lam, mu)
+
+
+SAFE_FAMILIES = {"1X2": "sieg", "DC": "sieg", "DNB": "sieg", "BTTS": "btts"}
+
+
+def safe_tips(forecasts: list[MatchForecast], min_prob: float = 0.70, max_prob: float = 0.90,
+              per_match: int = 2) -> list[dict]:
+    """Tipps mit hoher Trefferwahrscheinlichkeit (aus Pinnacle abgeleitet), wie auf dem
+    Sporttip-Schein. Pro Spiel höchstens `per_match` Tipps aus verschiedenen Markt-Familien;
+    innerhalb des Bereichs wird die höhere Quote (niedrigere Wahrscheinlichkeit) bevorzugt."""
+    from fussball.models.implied import label
+
+    out = []
+    for f in forecasts:
+        if not f.implied:
+            continue
+        cands = []
+        for market, sels in f.implied.items():
+            for sel, p in sels.items():
+                if min_prob <= p <= max_prob:
+                    fam = SAFE_FAMILIES.get(market, "tore" if market.startswith("OU") else market[:4])
+                    cands.append((p, market, sel, fam))
+        cands.sort(key=lambda c: c[0])  # knapp über der Schwelle = höhere faire Quote
+        used: set[str] = set()
+        for p, market, sel, fam in cands:
+            if fam in used or len(used) >= per_match:
+                continue
+            used.add(fam)
+            out.append({"match_id": f.match_id, "match": f"{f.home} – {f.away}", "kickoff": f.kickoff_utc.isoformat(),
+                        "comp": f.comp, "market": market, "selection": sel, "label": label(market, sel, f.home, f.away),
+                        "prob": p, "fair_odds": 1 / p})
+    out.sort(key=lambda t: (t["kickoff"], -t["prob"]))
+    return out
+
+
+def split_market(market: str) -> tuple[str, float]:
+    """'OU1.5' → ('OU', 1.5), 'HOME0.5' → ('HOME', 0.5), 'DC' → ('DC', 0.0)."""
+    for prefix in ("OU", "HOME", "AWAY"):
+        if market.startswith(prefix) and market != prefix:
+            return prefix, float(market[len(prefix):])
+    return market, 0.0
 
 
 def _store_predictions(engine: Engine, forecasts: list[MatchForecast]) -> None:
@@ -300,6 +376,7 @@ class DailyPlan:
     combos: list[Combo]
     config: dict
     blocked_leagues: list[str]
+    safe: list[dict] = field(default_factory=list)
 
 
 def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | None = None) -> DailyPlan:
@@ -312,7 +389,9 @@ def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | N
     staked_today, staked_week = _staked(engine)
     singles = select_singles(tips, cfg["singles"], cfg["bankroll"], staked_today, staked_week)
     combos = build_combos(tips, cfg["combos"])
-    return DailyPlan(forecasts, singles, combos, cfg, blocked)
+    sc = cfg.get("safe", {})
+    safe = safe_tips(forecasts, sc.get("min_prob", 0.70), sc.get("max_prob", 0.90), sc.get("per_match", 2))
+    return DailyPlan(forecasts, singles, combos, cfg, blocked, safe)
 
 
 def _staked(engine: Engine) -> tuple[float, float]:
@@ -351,6 +430,11 @@ def record_bet(engine: Engine, legs: list[dict], stake: float, odds: float, book
 def _leg_won(m: Match, market: str, line: float, selection: str) -> bool | None:
     if m is None or m.status != "finished" or m.ft_home is None:
         return None
+    if market in ("DC", "DNB", "BTTS", "HOME", "AWAY") or (market == "OU" and line != 2.5):
+        from fussball.models.implied import outcome
+
+        code = f"{market}{line}" if market in ("OU", "HOME", "AWAY") else market
+        return outcome(code, selection, m.ft_home, m.ft_away)
     if market == "1X2":
         result = "H" if m.ft_home > m.ft_away else "D" if m.ft_home == m.ft_away else "A"
         return result == selection

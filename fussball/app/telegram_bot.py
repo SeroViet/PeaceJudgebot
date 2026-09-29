@@ -43,6 +43,39 @@ def format_singles(plan: dict) -> str:
     return "\n".join(lines)
 
 
+def format_safe(plan: dict, limit: int = 15) -> str:
+    safe = plan.get("safe", [])
+    if not safe:
+        return "Aktuell keine Sicher-Tipps (es fehlen Pinnacle-Quoten für die nächsten Spiele)."
+    lines = ["<b>🎯 Sicher-Tipps</b> (Trefferwahrscheinlichkeit 70–90 %)",
+             "<i>Historisch: 78 % erwartet → 78 % getroffen (170 000 Tipps, 2020–2026)</i>"]
+    for t in safe[:limit]:
+        lines.append(f"\n<b>{t['id']}</b> {t['match']} ({t['comp']}, {_fmt_time(t['kickoff'])})\n"
+                     f"➡️ {t['label']}\n"
+                     f"Wahrscheinlichkeit <b>{t['prob']:.0%}</b> · faire Quote {t['fair_odds']:.2f} "
+                     f"→ bei Sporttip nur spielen, wenn Quote ≥ {t['fair_odds']:.2f}")
+    if len(safe) > limit:
+        lines.append(f"\n… und {len(safe) - limit} weitere in der App.")
+    return "\n".join(lines)
+
+
+def _find_legs(plan: dict, tip_id: str) -> list[dict] | None:
+    from fussball.service import split_market
+
+    tid = tip_id.upper()
+    if tid.startswith("K"):
+        c = next((c for c in plan["combos"] if c["id"] == tid), None)
+        return c["legs"] if c else None
+    if tid.startswith("S"):
+        t = next((t for t in plan.get("safe", []) if t["id"] == tid), None)
+        if not t:
+            return None
+        market, line = split_market(t["market"])
+        return [{**t, "market": market, "line": line}]
+    t = next((t for t in plan["singles"] if t["id"] == tip_id), None)
+    return [t] if t else None
+
+
 def format_combos(plan: dict) -> str:
     cur = plan.get("currency", "CHF")
     if not plan["combos"]:
@@ -115,11 +148,17 @@ def build(engine) -> Application | None:
                 "Danach antworte ich nur noch dir.")
             return
         await reply(update, "👋 PeaceJudge ist bereit.\n/heute – Tipps\n/kombi – Kombis\n/spiel Team – Prognose\n"
-                            "/bilanz – Bilanz\n/gesetzt Nr Einsatz Quote – Wette erfassen\n/update – neu berechnen")
+                            "/sicher – Tipps mit hoher Trefferquote (Über/Unter, 1X …)\n"
+                            "/bilanz – Bilanz\n/gesetzt Nr Einsatz Quote – Wette erfassen (z. B. /gesetzt S3 10 1.45)\n"
+                            "/update – neu berechnen")
 
     async def cmd_today(update: Update, _ctx):
         plan = state.load_plan()
         await reply(update, format_singles(plan))
+        await reply(update, format_safe(plan))
+
+    async def cmd_safe(update: Update, _ctx):
+        await reply(update, format_safe(state.load_plan(), limit=40))
 
     async def cmd_combo(update: Update, _ctx):
         await reply(update, format_combos(state.load_plan()))
@@ -137,15 +176,9 @@ def build(engine) -> Application | None:
         try:
             tip_id, stake, odds = ctx.args[0], float(ctx.args[1].replace(",", ".")), float(ctx.args[2].replace(",", "."))
         except (IndexError, ValueError):
-            await reply(update, "Format: /gesetzt 2 10 2.15  oder  /gesetzt K1 5 12.40")
+            await reply(update, "Format: /gesetzt 2 10 2.15  ·  /gesetzt S3 10 1.45  ·  /gesetzt K1 5 12.40")
             return
-        plan = state.load_plan()
-        if tip_id.upper().startswith("K"):
-            c = next((c for c in plan["combos"] if c["id"] == tip_id.upper()), None)
-            legs = c["legs"] if c else None
-        else:
-            t = next((t for t in plan["singles"] if t["id"] == tip_id), None)
-            legs = [t] if t else None
+        legs = _find_legs(state.load_plan(), tip_id)
         if not legs:
             await reply(update, f"Tipp {tip_id} nicht gefunden.")
             return
@@ -160,7 +193,7 @@ def build(engine) -> Application | None:
 
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CommandHandler("start", cmd_start))
-    for name, fn in (("heute", cmd_today), ("kombi", cmd_combo), ("spiel", cmd_match),
+    for name, fn in (("heute", cmd_today), ("sicher", cmd_safe), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     return app

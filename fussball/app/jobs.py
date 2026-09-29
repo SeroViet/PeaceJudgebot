@@ -28,7 +28,9 @@ async def start(engine) -> list:
     if _bot is not None:
         await _bot.initialize()
         await _bot.start()
-        await _bot.updater.start_polling(drop_pending_updates=True)
+        # Kurze Long-Polls: robuster hinter Proxys, die lange offene Verbindungen trennen.
+        await _bot.updater.start_polling(drop_pending_updates=True, timeout=5, poll_interval=1.0,
+                                         error_callback=lambda e: log.warning("Telegram-Polling: %s", e))
         log.info("Telegram-Bot gestartet")
         await telegram_bot.notify(_bot, "✅ <b>PeaceJudge gestartet</b>\nIch melde mich mit Tipps, Erinnerungen und "
                                         "Ergebnissen. /start zeigt alle Befehle.")
@@ -101,6 +103,7 @@ async def _daily_loop():
         plan = state.load_plan()
         await telegram_bot.notify(_bot, "☀️ <b>Tipps des Tages</b>\n\n" + telegram_bot.format_singles(plan)
                                   + "\n\n" + telegram_bot.format_combos(plan))
+        await telegram_bot.notify(_bot, telegram_bot.format_safe(plan))
         await asyncio.sleep(60)
 
 

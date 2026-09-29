@@ -24,8 +24,16 @@ def owner_id() -> int | None:
     return int(raw) if raw.lstrip("-").isdigit() else None
 
 
+WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+
+def _fmt_day(iso: str) -> str:
+    d = state.local(iso)
+    return f"{WEEKDAYS[d.weekday()]} {d:%d.%m.}"
+
+
 def _fmt_time(iso: str) -> str:
-    return state.local(iso).strftime("%a %d.%m. %H:%M")
+    return f"{_fmt_day(iso)} {state.local(iso):%H:%M}"
 
 
 def format_singles(plan: dict) -> str:
@@ -92,7 +100,7 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
     out = []
     for day in days:
         for c in [c for c in combos if c["day"] == day]:
-            d = state.local(c["legs"][0]["kickoff"]).strftime("%a %d.%m.")
+            d = _fmt_day(c["legs"][0]["kickoff"])
             legs = "\n".join(f"  {i}. {state.local(l['kickoff']).strftime('%H:%M')} {l['match']}\n"
                               f"     ➡️ <b>{l['label']}</b> ({l['prob']:.0%})" for i, l in enumerate(c["legs"], 1))
             out.append(f"🎯 <b>{c['id']} · {c['size']}er-Tageskombi {d}</b>\n{legs}\n"

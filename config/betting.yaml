@@ -1,6 +1,10 @@
 # Einsatz- und Tipp-Regeln. Alle Werte sind in der Web-App unter "Einstellungen" änderbar.
 currency: CHF
 bankroll: 500.0
+# Nur bei diesen Buchmachern nach der besten Quote suchen (Kürzel, z. B. [WH, 1XB, TIP]).
+# Leer = alle. Trage hier nur Anbieter ein, die in deinem Land zugelassen sind und bei
+# denen du ein Konto hast. Welche Kürzel es gibt: siehe App → Mehr → Einstellungen.
+bookmakers: []
 
 singles:
   # Wahrscheinlichkeit = faire Pinnacle-Quote (ohne Marge). Tipp nur, wenn ein Buchmacher

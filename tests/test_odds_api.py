@@ -1,5 +1,7 @@
 from datetime import datetime
 
+import pytest
+
 from sqlalchemy import select
 
 from fussball.data import football_data as fd
@@ -25,10 +27,25 @@ def _event(home, away, commence, pin=(2.0, 3.6, 3.9), wh=(2.15, 3.5, 3.6)):
 
 
 def test_similarity_handles_common_variants():
-    assert oa.similarity("Borussia Monchengladbach", "M'gladbach") < oa.similarity("Bayern Munich", "Bayern Munich")
-    assert oa.similarity("Manchester United", "Man United") >= 0.8
-    assert oa.similarity("Bayer Leverkusen", "Leverkusen") == 1.0
+    assert oa.similarity("Borussia Monchengladbach", "M'gladbach") == 1.0  # feste Zuordnung
+    assert oa.similarity("Manchester United", "Man United") == 1.0
+    assert oa.similarity("Bayer Leverkusen", "Leverkusen") == 0.9
     assert oa.similarity("Werder Bremen", "Augsburg") < 0.5
+
+
+@pytest.mark.parametrize("api_name, expected", [
+    ("Inter Milan", "Inter"), ("AC Milan", "Milan"), ("Atlético Madrid", "Ath Madrid"), ("Real Madrid", "Real Madrid"),
+    ("Paris Saint Germain", "Paris SG"), ("Paris FC", "Paris FC"), ("Bayer Leverkusen", "Leverkusen"),
+])
+def test_best_team_never_confuses_similar_clubs(api_name, expected):
+    teams = dict(enumerate(["Inter", "Milan", "Ath Madrid", "Real Madrid", "Paris SG", "Paris FC", "Leverkusen",
+                            "Leverkusen II"]))
+    assert teams[oa.best_team(api_name, teams)] == expected
+
+
+def test_best_team_rejects_ambiguous_names():
+    teams = {1: "Madrid Norte", 2: "Madrid Sur"}
+    assert oa.best_team("Madrid", teams) is None
 
 
 def test_event_rows_maps_bookmakers_and_markets():
@@ -84,3 +101,12 @@ def test_tips_use_best_named_bookmaker():
     tips = tips_from_forecasts([f], price="best")
     assert len(tips) == 1 and tips[0].bookmaker == "William Hill"
     assert tips[0].edge == 0.5 * 2.15 - 1
+
+
+def test_no_ou_tip_without_own_reference():
+    base = dict(match_id=1, comp="E0", comp_name="PL", kickoff_utc=datetime(2026, 10, 10, 11, 30), home="A", away="B",
+                lam=1.2, mu=0.8, probs_1x2={"H": 0.7, "D": 0.2, "A": 0.1}, probs_ou={"O": 0.41, "U": 0.59},
+                model_1x2={"H": 0.7, "D": 0.2, "A": 0.1}, market_1x2={"H": 0.7, "D": 0.2, "A": 0.1}, market_ou=None,
+                elo_diff=0.0, odds={"best": {"U": 2.15}, "books": {"U": "COOL"}})
+    assert tips_from_forecasts([MatchForecast(**base, ou_ok=False)]) == []
+    assert len(tips_from_forecasts([MatchForecast(**base, ou_ok=True)])) == 1

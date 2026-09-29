@@ -16,6 +16,13 @@
       <label>Wochenlimit (% Bankroll)<input name="weekly_limit_pct" type="number" step="1" value="{{ cfg.singles.weekly_limit_pct * 100 }}"></label>
     </div>
   </div>
+  <div class="card p-4 space-y-2">
+    <h2 class="font-bold">Meine Buchmacher</h2>
+    <p class="text-xs muted">Value wird nur bei diesen Anbietern gesucht. Nur Anbieter eintragen, die in deinem Land zugelassen
+      sind und bei denen du ein Konto hast. Leer = alle (nur zur Information).</p>
+    <input name="bookmakers" value="{{ cfg.bookmakers | join(', ') }}" placeholder="z. B. WH, 1XB, TIP">
+    <p class="text-[11px] muted">Verfügbare Kürzel: {% for b in books %}<span class="chip ml-1">{{ b }}{% if b in book_names %} = {{ book_names[b] }}{% endif %}</span>{% else %}– (erst nach dem ersten Odds-API-Abruf){% endfor %}</p>
+  </div>
   <div class="card p-4 space-y-3">
     <h2 class="font-bold">Kombis</h2>
     <div class="grid grid-cols-2 gap-3 text-xs muted">

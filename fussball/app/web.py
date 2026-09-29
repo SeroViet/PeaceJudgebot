@@ -20,7 +20,7 @@ from fussball import service
 from fussball.app import auth, state
 from fussball.config import load_leagues
 from fussball.data.db import init_db, make_engine, session_scope
-from fussball.data.schema import Bet, IngestLog, Match, Team, utcnow
+from fussball.data.schema import Bet, IngestLog, Match, Odds, Team, utcnow
 
 log = logging.getLogger(__name__)
 HERE = Path(__file__).parent
@@ -225,7 +225,11 @@ def create_app(engine=None, start_background: bool = True) -> FastAPI:
 
     @app.get("/einstellungen", response_class=HTMLResponse)
     def settings_form(request: Request):
-        return render(request, "einstellungen.html", cfg=service.get_config(engine), leagues=load_leagues(),
+        with session_scope(engine) as s:
+            books = sorted({b for (b,) in s.execute(select(Odds.bookmaker).where(Odds.source == "odds-api").distinct())}
+                           - {"PS", "BFE", "MBK"})
+        return render(request, "einstellungen.html", cfg=service.get_config(engine), leagues=load_leagues(), books=books,
+                      book_names=service.BOOK_NAMES,
                       enabled=service.enabled_leagues(engine), saved=request.query_params.get("ok"))
 
     @app.post("/einstellungen")
@@ -245,6 +249,8 @@ def create_app(engine=None, start_background: bool = True) -> FastAPI:
                        "leg_min_odds": f("leg_min_odds")},
             "force_enabled_leagues": sorted(chosen - default_on) + (["*"] if form.get("ignore_backtest") else []),
             "force_disabled_leagues": sorted(default_on - chosen),
+            "bookmakers": [b.strip().upper() for b in str(form.get("bookmakers") or "").replace(";", ",").split(",")
+                           if b.strip()],
         })  # fmt: skip
         return RedirectResponse("/einstellungen?ok=1", status_code=303)
 

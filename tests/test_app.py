@@ -120,11 +120,13 @@ def test_settings_roundtrip(app_env, engine):
     login(client, secret)
     form = {"bankroll": "800", "min_edge": "6", "min_prob": "0", "max_odds": "5", "kelly_fraction": "0.2",
             "max_stake_pct": "1.5", "daily_limit_pct": "5", "weekly_limit_pct": "12", "min_legs": "4", "max_legs": "5",
-            "leg_min_prob": "62", "leg_min_edge": "3", "leg_min_odds": "1.5", "leagues": ["D1", "E0"]}
+            "leg_min_prob": "62", "leg_min_edge": "3", "leg_min_odds": "1.5", "leagues": ["D1", "E0"],
+            "bookmakers": "wh, 1xb"}
     assert client.post("/einstellungen", data=form, follow_redirects=False).status_code == 303
     cfg = service.get_config(engine)
     assert cfg["bankroll"] == 800 and cfg["singles"]["min_edge"] == pytest.approx(0.06)
     assert set(service.enabled_leagues(engine)) == {"D1", "E0"}
+    assert cfg["bookmakers"] == ["WH", "1XB"]
 
 
 def test_diff_plans_detects_changes():

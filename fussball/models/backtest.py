@@ -54,8 +54,11 @@ RELATED_LEAGUES = {
 }  # fmt: skip
 
 
-def load_frame(engine: Engine) -> pd.DataFrame:
-    """Ein Spiel pro Zeile inkl. Quoten der relevanten Buchmacher."""
+def load_frame(engine: Engine, allowed_books: list[str] | None = None) -> pd.DataFrame:
+    """Ein Spiel pro Zeile inkl. Quoten der relevanten Buchmacher.
+
+    `allowed_books`: nur diese Buchmacher-Kürzel für die "beste Quote" berücksichtigen
+    (z. B. nur Anbieter, bei denen man tatsächlich wetten darf). Leer = alle."""
     matches = pd.read_sql(
         text("""
             SELECT m.id AS match_id, c.code AS comp, m.season, m.kickoff_utc, m.known_at,
@@ -86,6 +89,8 @@ def load_frame(engine: Engine) -> pd.DataFrame:
     wide = main.pivot_table(index="match_id", columns="col", values="price", aggfunc="last")  # jüngste Quote
     # Beste Vorab-Quote eines echten Buchmachers je Auswahl (für Tipps mit Anbietername)
     soft = odds[~odds["is_closing"] & ~odds["bookmaker"].isin(NOT_BETTABLE)]
+    if allowed_books:
+        soft = soft[soft["bookmaker"].isin([b.upper() for b in allowed_books])]
     soft = soft.drop_duplicates(["match_id", "bookmaker", "selection"], keep="last")
     top = soft.sort_values("price").drop_duplicates(["match_id", "selection"], keep="last")
     best = top.pivot(index="match_id", columns="selection", values="price").add_prefix("best_")
@@ -176,13 +181,13 @@ def walk_forward(frame: pd.DataFrame, comp: str, cfg: ModelConfig | None = None,
             rd = r._asdict()
             mk_pre, book_pre = _market(rd, False, SEL_1X2)
             mk_close, _ = _market(rd, True, SEL_1X2)
-            ou_pre, _ = _market(rd, False, SEL_OU)
+            ou_pre, ou_book = _market(rd, False, SEL_OU)
             ou_close, _ = _market(rd, True, SEL_OU)
             out = {
                 "match_id": r.match_id, "comp": comp, "season": r.season, "kickoff_utc": r.kickoff_utc,
                 "slot": slot, "home": r.home, "away": r.away, "status": r.status,
                 "ft_home": r.ft_home, "ft_away": r.ft_away, "lam": lam, "mu": mu,
-                "elo_diff": elo.diff(r.home, r.away), "market_book": book_pre,
+                "elo_diff": elo.diff(r.home, r.away), "market_book": book_pre, "ou_book": ou_book,
                 "eff_n_home": params.n_matches.get(r.home, 0.0), "eff_n_away": params.n_matches.get(r.away, 0.0),
             }  # fmt: skip
             for k, v in one_x_two(m).items():

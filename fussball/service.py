@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 
@@ -112,10 +113,22 @@ def update_data(engine: Engine) -> dict:
     from fussball.data.odds_api import OddsApiClient, import_odds
 
     client = OddsApiClient()
-    if client.configured:
+    interval_h = float(os.getenv("ODDS_API_INTERVAL_HOURS", "24"))
+    with session_scope(engine) as s:
+        last = s.get(AppSetting, "odds_api_last")
+        last_at = datetime.fromisoformat(last.value) if last and isinstance(last.value, str) else None
+    due = last_at is None or utcnow() - last_at >= timedelta(hours=interval_h)
+    if client.configured and not due:
+        odds_api = {"skipped": f"letzter Abruf {last_at:%d.%m. %H:%M} UTC, Intervall {interval_h:g} h (Credits sparen)"}
+    elif client.configured:
         try:
             with session_scope(engine) as s:
                 odds_api = import_odds(s, client, main)
+                row = s.get(AppSetting, "odds_api_last")
+                if row:
+                    row.value = utcnow().isoformat()
+                else:
+                    s.add(AppSetting(key="odds_api_last", value=utcnow().isoformat()))
             odds_api["credits_left"] = client.remaining
         except Exception as exc:  # noqa: BLE001
             log.exception("Odds API fehlgeschlagen")
@@ -150,7 +163,9 @@ class MatchForecast:
     factors: list[str] = field(default_factory=list)
     league_ok: bool = True
     mode: str = "markt"  # "modell" = Modell+Markt (Liga freigegeben), "markt" = faire Marktquote
-    reference: str | None = None  # PS | BFE | Avg
+    reference: str | None = None  # PS | BFE | Avg (1X2)
+    reference_ou: str | None = None  # Referenz für Über/Unter 2.5
+    ou_ok: bool = False  # Tipps auf Über/Unter nur mit eigener Referenz
 
     def fair(self, sel: str) -> float:
         p = self.probs_1x2.get(sel) or self.probs_ou.get(sel)
@@ -184,7 +199,7 @@ def predict_upcoming(engine: Engine, days: int = 4, now: datetime | None = None)
     now = now or utcnow()
     summary = model_summary()
     leagues = load_leagues()
-    frame = load_frame(engine)
+    frame = load_frame(engine, allowed_books=get_config(engine).get("bookmakers") or None)
     upcoming = frame[(frame["status"] == "scheduled") & (frame["kickoff_utc"] > now)
                      & (frame["kickoff_utc"] <= now + timedelta(days=days))]
     forecasts: list[MatchForecast] = []
@@ -225,6 +240,7 @@ def predict_upcoming(engine: Engine, days: int = 4, now: datetime | None = None)
                 top_scores=correct_scores(m, 6), factors=_factors(r, None, market, model),
                 league_ok=model_ok or (mv_ok and r.get("market_book") == "PS"),
                 mode="modell" if model_ok else "markt", reference=r.get("market_book"),
+                reference_ou=r.get("ou_book"), ou_ok=model_ok or (mv_ok and r.get("ou_book") == "PS"),
             ))  # fmt: skip
     forecasts.sort(key=lambda f: f.kickoff_utc)
     _store_predictions(engine, forecasts)
@@ -247,7 +263,9 @@ def _store_predictions(engine: Engine, forecasts: list[MatchForecast]) -> None:
                                      explanation={"factors": f.factors}, known_at=now))
 
 
-BOOK_NAMES = {"B365": "Bet365", "BW": "bwin", "WH": "William Hill", "1XB": "1xBet", "BFD": "Betfred",
+BOOK_NAMES = {"UNIBET_SE": "Unibet (SE)", "UNIBET_NL": "Unibet (NL)", "UNIBET_FR": "Unibet (FR)",
+              "LEOVEGAS_SE": "LeoVegas (SE)", "BOL": "BetOnline", "MYB": "MyBookie", "EVG": "Everygame",
+              "B365": "Bet365", "BW": "bwin", "WH": "William Hill", "1XB": "1xBet", "BFD": "Betfred",
               "BV": "BetVictor", "PP": "Paddy Power", "SKB": "Sky Bet", "IW": "Interwetten", "VC": "VC Bet",
               "UNI": "Unibet", "MAR": "Marathonbet", "888": "888sport", "BETC": "Betclic", "BTSS": "Betsson",
               "TIP": "Tipico", "LEO": "LeoVegas", "NORD": "NordicBet", "COOL": "Coolbet", "BF": "Betfair Sportsbook"}
@@ -257,6 +275,8 @@ def tips_from_forecasts(forecasts: list[MatchForecast], price: str = "best") -> 
     tips = []
     for f in forecasts:
         for market, line, probs, labels in (("1X2", 0.0, f.probs_1x2, LABELS_1X2), ("OU", 2.5, f.probs_ou, LABELS_OU)):
+            if market == "OU" and not f.ou_ok:
+                continue  # keine eigene Referenz (z. B. Pinnacle ohne 2.5-Linie) → kein Tipp
             mk = f.market_1x2 if market == "1X2" else f.market_ou
             for sel, p in probs.items():
                 odds = f.odds.get(price, {}).get(sel)

@@ -27,6 +27,7 @@
 
 <div class="card p-4">
   <h2 class="font-bold mb-2">Über/Unter 2.5</h2>
+  {% if not f.ou_ok %}<p class="text-xs warn mb-2">Keine Pinnacle-Linie 2.5 – Werte nur vom Modell, daher kein Tipp.</p>{% endif %}
   <div class="table-scroll"><table class="w-full text-sm tabular">
     <tr class="muted text-xs text-left"><th></th><th>Prognose</th><th>Markt</th><th>faire Q.</th><th>Beste Quote</th><th>Edge</th></tr>
     {% for k, name in [('O', 'Über 2.5'), ('U', 'Unter 2.5')] %}

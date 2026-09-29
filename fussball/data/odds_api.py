@@ -45,6 +45,22 @@ BOOKMAKER_CODES = {
 }  # fmt: skip
 EXCHANGES = {"BFE", "MBK"}
 
+# Feste Zuordnung (The Odds API → football-data) für Namen, die per Ähnlichkeit
+# mehrdeutig oder falsch wären (z. B. "Inter Milan" ≠ "Milan", "Atlético" ≠ "Real Madrid").
+TEAM_ALIASES = {
+    "Inter Milan": "Inter", "AC Milan": "Milan", "Atlético Madrid": "Ath Madrid", "Atletico Madrid": "Ath Madrid",
+    "Athletic Bilbao": "Ath Bilbao", "Paris Saint Germain": "Paris SG", "Paris FC": "Paris FC",
+    "Borussia Monchengladbach": "M'gladbach", "Eintracht Frankfurt": "Ein Frankfurt",
+    "Nottingham Forest": "Nott'm Forest", "Espanyol": "Espanol", "Wolverhampton Wanderers": "Wolves",
+    "West Bromwich Albion": "West Brom", "Queens Park Rangers": "QPR", "Sheffield Wednesday": "Sheffield Weds",
+    "Saint Etienne": "St Etienne", "FC St. Pauli": "St Pauli", "1. FC Heidenheim": "Heidenheim",
+    "Hellas Verona": "Verona", "Sporting Gijón": "Sp Gijon", "Real Valladolid": "Valladolid",
+    "Leganés": "Leganes", "Real Sociedad": "Sociedad", "Real Betis": "Betis", "Manchester City": "Man City",
+    "Manchester United": "Man United", "Real Madrid": "Real Madrid",
+}
+MIN_SCORE = 0.8
+MIN_MARGIN = 0.1  # Abstand zum zweitbesten Kandidaten, sonst gilt der Name als mehrdeutig
+
 
 def _norm(name: str) -> str:
     s = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
@@ -54,14 +70,29 @@ def _norm(name: str) -> str:
 
 
 def similarity(a: str, b: str) -> float:
+    """1.0 nur bei identischem Namen (nach Normalisierung); Teilmengen der Wörter 0.9."""
+    if TEAM_ALIASES.get(a) is not None:
+        return 1.0 if TEAM_ALIASES[a] == b else 0.0
     na, nb = _norm(a), _norm(b)
     if not na or not nb:
         return 0.0
-    if na == nb or na in nb or nb in na:
+    if na == nb:
         return 1.0
     ta, tb = set(na.split()), set(nb.split())
+    if ta <= tb or tb <= ta:
+        return 0.9
     jacc = len(ta & tb) / len(ta | tb)
-    return max(SequenceMatcher(None, na, nb).ratio(), jacc)
+    return min(0.89, max(SequenceMatcher(None, na, nb).ratio(), jacc))
+
+
+def best_team(api_name: str, candidates: dict[int, str]) -> int | None:
+    """Eindeutig bester Kandidat oder None (zu unähnlich bzw. mehrdeutig)."""
+    ranked = sorted(((similarity(api_name, n), tid) for tid, n in candidates.items()), reverse=True)
+    if not ranked or ranked[0][0] < MIN_SCORE:
+        return None
+    if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < MIN_MARGIN:
+        return None
+    return ranked[0][1]
 
 
 class OddsApiClient:
@@ -122,18 +153,22 @@ def match_event(session: Session, comp_id: int, event: dict, window_h: int = 36)
     names = dict(session.execute(select(Team.id, Team.name)).all())
     alias = dict(session.execute(select(TeamAlias.alias, TeamAlias.team_id).where(TeamAlias.source == SOURCE)).all())
 
-    def score(api_name: str, team_id: int) -> float:
-        if api_name in alias:
-            return 1.0 if alias[api_name] == team_id else 0.0
-        return similarity(api_name, names[team_id])
+    league_teams = _league_teams(session, comp_id, kickoff)
 
-    best, best_score = None, 0.0
-    for mid, home_id, away_id in cands:
-        sc = min(score(event["home_team"], home_id), score(event["away_team"], away_id))
-        if sc > best_score:
-            best, best_score = (mid, home_id, away_id), sc
-    if best is None or best_score < 0.6:
-        return _create_match(session, comp_id, event, kickoff, names, score)
+    def resolve(api_name: str) -> int | None:
+        if api_name in TEAM_ALIASES:  # feste Zuordnung hat Vorrang
+            return next((t for t in league_teams if names[t] == TEAM_ALIASES[api_name]), None)
+        if api_name in alias:
+            return alias[api_name]
+        return best_team(api_name, {t: names[t] for t in league_teams})
+
+    home_id, away_id = resolve(event["home_team"]), resolve(event["away_team"])
+    if home_id is None or away_id is None or home_id == away_id:
+        log.warning("Team nicht eindeutig zuordenbar: %s – %s", event["home_team"], event["away_team"])
+        return None
+    best = next(((mid, h, a) for mid, h, a in cands if h == home_id and a == away_id), None)
+    if best is None:
+        return _create_match(session, comp_id, event, kickoff, home_id, away_id)
     mid, home_id, away_id = best
     upsert(session, TeamAlias, [{"team_id": home_id, "source": SOURCE, "alias": event["home_team"]},
                                 {"team_id": away_id, "source": SOURCE, "alias": event["away_team"]}],
@@ -141,24 +176,27 @@ def match_event(session: Session, comp_id: int, event: dict, window_h: int = 36)
     return mid
 
 
-def _create_match(session: Session, comp_id: int, event: dict, kickoff: datetime, names: dict, score) -> int | None:
-    """Spiel ist noch nicht in fixtures.csv: anhand bekannter Teams der Liga anlegen."""
+def _league_teams(session: Session, comp_id: int, kickoff: datetime) -> set[int]:
+    recent = kickoff - timedelta(days=400)
+    return {tid for pair in session.execute(
+        select(Match.home_team_id, Match.away_team_id).where(Match.competition_id == comp_id,
+                                                             Match.kickoff_utc >= recent)).all() for tid in pair}
+
+
+def _create_match(session: Session, comp_id: int, event: dict, kickoff: datetime, home_id: int,
+                  away_id: int) -> int | None:
+    """Spiel ist noch nicht in fixtures.csv: mit den eindeutig zugeordneten Teams anlegen."""
     from fussball.cli import current_season_code
     from fussball.data.football_data import season_label
 
-    recent = kickoff - timedelta(days=400)
-    team_ids = {tid for pair in session.execute(
-        select(Match.home_team_id, Match.away_team_id).where(Match.competition_id == comp_id,
-                                                             Match.kickoff_utc >= recent)).all() for tid in pair}
-    def pick(api_name):
-        ranked = sorted(((score(api_name, t), t) for t in team_ids), reverse=True)
-        return ranked[0][1] if ranked and ranked[0][0] >= 0.8 else None
-
-    home_id, away_id = pick(event["home_team"]), pick(event["away_team"])
-    if home_id is None or away_id is None or home_id == away_id:
-        log.info("Kein Spiel/Team gefunden für %s – %s (%s)", event["home_team"], event["away_team"], kickoff)
-        return None
     season = season_label(current_season_code(kickoff.date()))
+    existing = session.execute(select(Match).where(Match.competition_id == comp_id, Match.season == season,
+                                                   Match.home_team_id == home_id, Match.away_team_id == away_id)
+                               ).scalar_one_or_none()
+    if existing is not None and existing.status == "finished":
+        log.warning("Paarung %s – %s ist diese Saison schon gespielt; Event ignoriert",
+                    event["home_team"], event["away_team"])
+        return None
     now = utcnow()
     upsert(session, Match, [{"competition_id": comp_id, "season": season, "kickoff_utc": kickoff,
                              "kickoff_time_known": True, "home_team_id": home_id, "away_team_id": away_id,

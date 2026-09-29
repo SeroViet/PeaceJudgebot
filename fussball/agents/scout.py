@@ -76,7 +76,9 @@ Recherchiere mit der Websuche aktuelle, verlässliche Informationen zum genannte
 - Motivation: Tabellensituation, Bedeutung des Spiels, Trainerwechsel, Unruhe
 Suche auch in der Landessprache der Teams (z. B. Deutsch, Englisch, Italienisch, Spanisch,
 Französisch). Bevorzuge offizielle Vereinsseiten, Pressekonferenzen und grosse Sportmedien.
-Erfinde nichts: Wenn eine Information nicht zu finden ist, sage das.
+Gehe mit den Suchen sparsam um: zuerst gezielt nach Vorbericht/Team-News beider Teams,
+dann Sperren/Karten, zuletzt Aufstellung. Erfinde nichts: Wenn eine Information nicht zu
+finden ist, sage das.
 Bewerte danach den vorgegebenen Tipp nur anhand dieser Fakten: Ändern die Ausfälle,
 Aufstellung oder Belastung etwas Wesentliches (z. B. Torjäger fehlt bei einem Über-Tipp,
 Stammtorhüter gesperrt bei einem Unter-Tipp, B-Elf wegen Rotation beim Favoriten)?
@@ -96,9 +98,15 @@ def _count_searches(content) -> int:
 
 
 def research(client, match: str, kickoff_local: str, competition: str, tip: str, context: str,
-             model: str = MODEL, max_searches: int = 6) -> tuple[str, float, int]:
+             model: str = MODEL, max_searches: int = 8) -> tuple[str, float, int]:
     """Schritt 1: Websuche. Gibt (Rechercheergebnis als Text, Kosten, Anzahl Suchen) zurück."""
-    user = (f"Spiel: {match}\nWettbewerb: {competition}\nAnstoss (Schweizer Zeit): {kickoff_local}\n"
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    today = datetime.now(ZoneInfo("Europe/Zurich")).strftime("%A, %d.%m.%Y %H:%M")
+    user = (f"Heute ist {today} (Schweizer Zeit). Nutze nur Informationen, die für dieses Spiel aktuell sind; "
+            "Artikel aus früheren Saisons oder vor dem letzten Spiel der Teams ignorieren.\n"
+            f"Spiel: {match}\nWettbewerb: {competition}\nAnstoss (Schweizer Zeit): {kickoff_local}\n"
             f"Zu prüfender Tipp: {tip}\nBekannte Daten aus unserer Datenbank:\n{context}\n\n"
             "Recherchiere jetzt und fasse alle Fakten mit Quellen-URLs zusammen.")
     messages = [{"role": "user", "content": user}]

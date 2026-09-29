@@ -29,20 +29,28 @@ def spent_today(engine: Engine) -> float:
 
 
 def fatigue_context(engine: Engine, match_id: int) -> str:
-    """Belastung aus unserer Datenbank (Ligaspiele): Ruhetage und Spiele in 14 Tagen."""
+    """Belastung aus unserer Datenbank (nur Ligaspiele): letztes gespieltes Spiel und
+    angesetzte Spiele bis zum Anpfiff."""
+    now = utcnow()
     with session_scope(engine) as s:
         m = s.get(Match, match_id)
-        lines = []
+        lines = [f"Stand: {now:%d.%m.%Y} (UTC). Anpfiff dieses Spiels: {m.kickoff_utc:%d.%m.%Y %H:%M} UTC."]
         for team_id in (m.home_team_id, m.away_team_id):
             name = s.get(Team, team_id).name
-            past = s.scalars(select(Match.kickoff_utc).where(
+            q = select(Match.kickoff_utc, Match.status).where(
                 or_(Match.home_team_id == team_id, Match.away_team_id == team_id),
-                Match.kickoff_utc < m.kickoff_utc, Match.status == "finished").order_by(Match.kickoff_utc.desc())
-            ).all()
-            last = past[0] if past else None
-            n14 = sum(1 for k in past if k >= m.kickoff_utc - timedelta(days=14))
-            rest = f"{(m.kickoff_utc - last).days} Tage seit letztem Ligaspiel" if last else "letztes Spiel unbekannt"
-            lines.append(f"- {name}: {rest}, {n14} Ligaspiele in 14 Tagen (Europapokal/Pokal nicht erfasst)")
+                Match.kickoff_utc < m.kickoff_utc, Match.id != m.id)
+            rows = s.execute(q.order_by(Match.kickoff_utc.desc())).all()
+            played = [k for k, st in rows if st == "finished"]
+            upcoming = sorted(k for k, st in rows if st == "scheduled" and k > now)
+            last = played[0] if played else None
+            parts = [f"letztes Ligaspiel {last:%d.%m.}" if last else "letztes Ligaspiel unbekannt"]
+            if upcoming:
+                parts.append("bis zum Anpfiff noch angesetzt: " + ", ".join(f"{k:%d.%m.}" for k in upcoming))
+            before = upcoming[-1] if upcoming else last
+            if before:
+                parts.append(f"Ruhetage vor dem Spiel: {(m.kickoff_utc - before).days}")
+            lines.append(f"- {name}: " + "; ".join(parts) + " (Europapokal/Pokal/Länderspiele nicht erfasst)")
         return "\n".join(lines)
 
 

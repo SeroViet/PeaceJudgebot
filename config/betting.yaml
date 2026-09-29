@@ -3,9 +3,13 @@ currency: CHF
 bankroll: 500.0
 
 singles:
-  min_edge: 0.05          # Edge = p × Quote − 1
+  # Wahrscheinlichkeit = faire Pinnacle-Quote (ohne Marge). Tipp nur, wenn ein Buchmacher
+  # mind. min_edge darüber liegt. Backtest 2020–2026, 10 Ligen, Edge ≥ 3 %:
+  # 817 Wetten, CLV +3.6 % (in jeder Saison positiv), ROI +3.2 %.
+  price: best             # best = beste Quote eines echten Buchmachers, avg = Durchschnitt
+  min_edge: 0.03          # Edge = p × Quote − 1
   min_prob: 0.0
-  max_odds: 6.0
+  max_odds: 4.0
   kelly_fraction: 0.25    # Viertel-Kelly
   max_stake_pct: 0.02     # max. 2 % der Bankroll pro Tipp
   daily_limit_pct: 0.06

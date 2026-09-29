@@ -4,43 +4,44 @@
 <div class="card p-4">
   <div class="text-xs muted">{{ f.comp_name }} · {{ f.kickoff_utc | local }}</div>
   <h1 class="text-xl font-bold mt-1">{{ f.home }} – {{ f.away }}</h1>
+  <div class="text-xs muted mt-1">Wahrscheinlichkeiten: {{ 'Modell + Markt' if f.mode == 'modell' else 'faire ' ~ ({'PS': 'Pinnacle', 'BFE': 'Betfair-Exchange', 'Avg': 'Durchschnitts'}.get(f.reference, '') ) ~ '-Quote (ohne Marge)' }}</div>
   <div class="text-sm muted mt-1">Erwartete Tore {{ '%.2f' | format(f.lam) }} : {{ '%.2f' | format(f.mu) }}</div>
-  {% if not f.league_ok %}<div class="text-xs warn mt-2">⚠️ Liga im Backtest ohne Vorteil gegenüber dem Markt – nur zur Info.</div>{% endif %}
+  {% if not f.league_ok %}<div class="text-xs warn mt-2">⚠️ Keine Pinnacle-Quote vorhanden – nur zur Info, keine Tipps.</div>{% endif %}
 </div>
 
 <div class="card p-4">
   <h2 class="font-bold mb-2">1X2</h2>
-  <table class="w-full text-sm tabular">
-    <tr class="muted text-xs text-left"><th></th><th>Prognose</th><th>Modell</th><th>Markt</th><th>faire Q.</th><th>Ø Quote</th><th>Edge</th></tr>
+  <div class="table-scroll"><table class="w-full text-sm tabular">
+    <tr class="muted text-xs text-left"><th></th><th>Prognose</th><th>Modell</th><th>Markt</th><th>faire Q.</th><th>Beste Quote</th><th>Edge</th></tr>
     {% for k, name in [('H', f.home), ('D', 'Unentschieden'), ('A', f.away)] %}
-    {% set p = f.probs_1x2[k] %}{% set q = f.odds.avg.get(k) %}
-    <tr class="border-t border-[#1f2a37]">
+    {% set p = f.probs_1x2[k] %}{% set q = (f.odds.best or {}).get(k) %}
+    <tr class="border-t">
       <td>{{ name }}</td><td><b>{{ p | pct }}</b></td><td class="muted">{{ f.model_1x2[k] | pct }}</td>
       <td class="muted">{{ f.market_1x2[k] | pct if f.market_1x2 else '–' }}</td>
-      <td>{{ (1 / p) | odds }}</td><td>{{ q | odds }}</td>
-      <td class="{{ 'pos' if q and p * q > 1.05 else 'muted' }}">{{ (p * q - 1) | pct if q else '–' }}</td>
+      <td>{{ (1 / p) | odds }}</td><td>{{ q | odds }}<div class="text-[11px] muted">{{ (f.odds.books or {}).get(k, '') }}</div></td>
+      <td class="{{ 'pos' if q and p * q > 1.03 else 'muted' }}">{{ (p * q - 1) | pct if q else '–' }}</td>
     </tr>
     {% endfor %}
-  </table>
+  </table></div>
 </div>
 
 <div class="card p-4">
   <h2 class="font-bold mb-2">Über/Unter 2.5</h2>
-  <table class="w-full text-sm tabular">
-    <tr class="muted text-xs text-left"><th></th><th>Prognose</th><th>Markt</th><th>faire Q.</th><th>Ø Quote</th><th>Edge</th></tr>
+  <div class="table-scroll"><table class="w-full text-sm tabular">
+    <tr class="muted text-xs text-left"><th></th><th>Prognose</th><th>Markt</th><th>faire Q.</th><th>Beste Quote</th><th>Edge</th></tr>
     {% for k, name in [('O', 'Über 2.5'), ('U', 'Unter 2.5')] %}
-    {% set p = f.probs_ou[k] %}{% set q = f.odds.avg.get(k) %}
-    <tr class="border-t border-[#1f2a37]">
+    {% set p = f.probs_ou[k] %}{% set q = (f.odds.best or {}).get(k) %}
+    <tr class="border-t">
       <td>{{ name }}</td><td><b>{{ p | pct }}</b></td><td class="muted">{{ f.market_ou[k] | pct if f.market_ou else '–' }}</td>
-      <td>{{ (1 / p) | odds }}</td><td>{{ q | odds }}</td>
-      <td class="{{ 'pos' if q and p * q > 1.05 else 'muted' }}">{{ (p * q - 1) | pct if q else '–' }}</td>
+      <td>{{ (1 / p) | odds }}</td><td>{{ q | odds }}<div class="text-[11px] muted">{{ (f.odds.books or {}).get(k, '') }}</div></td>
+      <td class="{{ 'pos' if q and p * q > 1.03 else 'muted' }}">{{ (p * q - 1) | pct if q else '–' }}</td>
     </tr>
     {% endfor %}
-  </table>
+  </table></div>
 </div>
 
 <div class="card p-4">
-  <h2 class="font-bold mb-2">Weitere Märkte (reines Modell)</h2>
+  <h2 class="font-bold mb-2">Weitere Märkte (reines Modell, nur Info)</h2>
   <div class="grid grid-cols-2 gap-2 text-sm tabular">
     <div>Doppelte Chance 1X: <b>{{ f.other_markets.DC['1X'] | pct }}</b></div>
     <div>Doppelte Chance X2: <b>{{ f.other_markets.DC['X2'] | pct }}</b></div>

@@ -29,6 +29,8 @@ from fussball.models.pooling import pool
 log = logging.getLogger(__name__)
 
 SHARP_BOOKS = ("PS", "BFE", "Avg")  # Priorität für "Marktwahrscheinlichkeit"
+# Aggregate, Börsen und die Referenz selbst sind keine Buchmacher, bei denen man "shoppt".
+NOT_BETTABLE = {"PS", "BFE", "MBK", "Max", "Avg", "BbMx", "BbAv"}
 SEL_1X2 = ("H", "D", "A")
 SEL_OU = ("O", "U")
 
@@ -65,24 +67,32 @@ def load_frame(engine: Engine) -> pd.DataFrame:
             JOIN teams ta ON ta.id = m.away_team_id
         """),
         engine,
-        parse_dates=["kickoff_utc", "known_at"],
     )
+    for col in ("kickoff_utc", "known_at"):  # robust gegen gemischte Formate (mit/ohne Mikrosekunden)
+        matches[col] = pd.to_datetime(matches[col], format="ISO8601")
     odds = pd.read_sql(
         text("""
             SELECT match_id, bookmaker, market, selection, is_closing, price, known_at
             FROM odds
-            WHERE bookmaker IN ('PS','BFE','Avg','Max','B365')
-              AND (market = '1X2' OR (market = 'OU' AND line = 2.5))
+            WHERE market = '1X2' OR (market = 'OU' AND line = 2.5)
         """),
         engine,
-        parse_dates=["known_at"],
     )
-    odds["col"] = (
-        odds["bookmaker"] + "_" + np.where(odds["is_closing"].astype(bool), "C", "P") + "_" + odds["selection"]
-    )
-    wide = odds.pivot_table(index="match_id", columns="col", values="price", aggfunc="first")
-    slot = odds[~odds["is_closing"].astype(bool)].groupby("match_id")["known_at"].min().rename("slot")
-    return matches.join(wide, on="match_id").join(slot, on="match_id").sort_values("kickoff_utc")
+    odds["known_at"] = pd.to_datetime(odds["known_at"], format="ISO8601")
+    odds = odds.sort_values("known_at")
+    odds["is_closing"] = odds["is_closing"].astype(bool)
+    main = odds[odds["bookmaker"].isin(["PS", "BFE", "Avg", "Max", "B365"])].copy()
+    main["col"] = main["bookmaker"] + "_" + np.where(main["is_closing"], "C", "P") + "_" + main["selection"]
+    wide = main.pivot_table(index="match_id", columns="col", values="price", aggfunc="last")  # jüngste Quote
+    # Beste Vorab-Quote eines echten Buchmachers je Auswahl (für Tipps mit Anbietername)
+    soft = odds[~odds["is_closing"] & ~odds["bookmaker"].isin(NOT_BETTABLE)]
+    soft = soft.drop_duplicates(["match_id", "bookmaker", "selection"], keep="last")
+    top = soft.sort_values("price").drop_duplicates(["match_id", "selection"], keep="last")
+    best = top.pivot(index="match_id", columns="selection", values="price").add_prefix("best_")
+    book = top.pivot(index="match_id", columns="selection", values="bookmaker").add_prefix("bestbook_")
+    slot = odds[~odds["is_closing"]].groupby("match_id")["known_at"].min().rename("slot")
+    return (matches.join(wide, on="match_id").join(best, on="match_id").join(book, on="match_id")
+            .join(slot, on="match_id").sort_values("kickoff_utc"))
 
 
 def _market(row, closing: bool, sels) -> tuple[dict[str, float] | None, str | None]:
@@ -187,6 +197,8 @@ def walk_forward(frame: pd.DataFrame, comp: str, cfg: ModelConfig | None = None,
             for sel in (*SEL_1X2, *SEL_OU):
                 out[f"avg_{sel}"] = rd.get(f"Avg_P_{sel}")
                 out[f"max_{sel}"] = rd.get(f"Max_P_{sel}")
+                out[f"best_{sel}"] = rd.get(f"best_{sel}")
+                out[f"bestbook_{sel}"] = rd.get(f"bestbook_{sel}")
             rows.append(out)
     return pd.DataFrame(rows)
 
@@ -320,7 +332,8 @@ def evaluate(preds: pd.DataFrame, rules: BetRules) -> dict:
             "ou_market": logloss_ou(t2, t2[["mkt_O", "mkt_U"]].rename(columns=lambda c: c.replace("mkt_", "p_"))),
             "ou_blend": logloss_ou(t2, p2), "bets_1x2": summarize_bets(b1), "bets_ou": summarize_bets(b2),
         })  # fmt: skip
-    bets = pd.concat([b for b in all_bets if not b.empty], ignore_index=True) if all_bets else pd.DataFrame()
+    non_empty = [b for b in all_bets if not b.empty]
+    bets = pd.concat(non_empty, ignore_index=True) if non_empty else pd.DataFrame()
     return {"seasons": report, "bets": bets, "total": summarize_bets(bets)}
 
 
@@ -366,3 +379,39 @@ def league_summary(preds: pd.DataFrame, rules: BetRules) -> dict:
                         "ll_market": r["market"]["logloss"], "ll_blend": r["blend"]["logloss"],
                         "bets": r["bets_1x2"]["bets"] + r["bets_ou"]["bets"]} for r in rows],
     }  # fmt: skip
+
+
+def market_value_summary(frame: pd.DataFrame, min_edge: float = 0.03, max_odds: float = 4.0) -> dict:
+    """Strategie "Markt-Value": faire Wahrscheinlichkeit aus Pinnacle-Vorabquoten,
+    Wette zur besten Quote eines echten Buchmachers (keine Börsen/Aggregate).
+    Unabhängig vom Modell. Freigabe bei ≥ 300 Wetten, positivem CLV und CLV-t-Wert ≥ 2
+    (CLV schwankt viel weniger als der Gewinn und ist daher der verlässlichere Test)."""
+    fin = frame[frame["status"] == "finished"]
+    bets = []
+    for r in fin.to_dict("records"):
+        for sels in (SEL_1X2, SEL_OU):
+            pre = [r.get(f"PS_P_{k}") for k in sels]
+            close = [r.get(f"PS_C_{k}") for k in sels]
+            if any(x is None or pd.isna(x) for x in pre):
+                continue
+            fair = dict(zip(sels, fair_probs(pre)))
+            fair_close = dict(zip(sels, fair_probs(close))) if not any(x is None or pd.isna(x) for x in close) else {}
+            total = r["ft_home"] + r["ft_away"]
+            result = {"H": r["ft_home"] > r["ft_away"], "D": r["ft_home"] == r["ft_away"],
+                      "A": r["ft_home"] < r["ft_away"], "O": total > 2.5, "U": total < 2.5}
+            for k in sels:
+                price = r.get(f"best_{k}")
+                if price is None or pd.isna(price) or price > max_odds or fair[k] * price - 1 < min_edge:
+                    continue
+                bets.append({"season": r["season"], "comp": r["comp"], "book": r.get(f"bestbook_{k}"), "sel": k,
+                             "price": price, "edge": fair[k] * price - 1, "won": result[k],
+                             "pnl": price - 1 if result[k] else -1.0,
+                             "clv": price * fair_close[k] - 1 if k in fair_close else np.nan})
+    b = pd.DataFrame(bets)
+    s = summarize_bets(b)
+    clv = b["clv"].dropna() if len(b) else pd.Series(dtype=float)
+    clv_t = float(clv.mean() / (clv.std(ddof=1) / np.sqrt(len(clv)))) if len(clv) > 1 and clv.std() > 0 else 0.0
+    per_season = (b.groupby("season").agg(bets=("pnl", "size"), roi=("pnl", "mean"), clv=("clv", "mean"))
+                  .round(4).reset_index().to_dict("records")) if len(b) else []
+    return {"min_edge": min_edge, "max_odds": max_odds, "reference": "Pinnacle", **s, "clv_t": clv_t,
+            "per_season": per_season, "enabled": bool(s["bets"] >= 300 and s["clv"] > 0 and clv_t >= 2)}

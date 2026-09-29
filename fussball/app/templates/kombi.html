@@ -21,7 +21,7 @@
   <table class="w-full text-sm">
     <tr class="text-xs muted text-left"><th>Spiel</th><th>Tipp</th><th class="text-right">Min.-Quote</th></tr>
     {% for l in c.legs %}
-    <tr class="border-t border-[#1f2a37]">
+    <tr class="border-t">
       <td><div>{{ l.match }}</div><div class="text-[11px] muted">{{ l.comp }} · {{ l.kickoff | local }}</div></td>
       <td>{{ l.label }}<div class="text-[11px] muted">{{ l.prob | pct }} · Ø {{ l.odds | odds }}</div></td>
       <td class="text-right tabular font-bold">{{ l.min_odds | odds }}</td>

@@ -7,15 +7,35 @@
 {% else %}
 <p class="text-xs muted">Stand {{ summary.generated_at | local }} · Testsaisons {{ summary.test_seasons | join(', ') }} ·
   Wettquote: {{ summary.price }} · Edge-Schwelle {{ summary.min_edge | pct(0) }}</p>
+{% set mv = summary.market_value %}
+{% if mv %}
+<div class="card p-4 text-sm">
+  <div class="flex justify-between"><b>Strategie „Markt-Value“ (Hauptmodus)</b>
+    <span class="{{ 'pos' if mv.enabled else 'warn' }}">{{ '✅ aktiv' if mv.enabled else '⛔ gesperrt' }}</span></div>
+  <p class="text-xs muted mt-1">Faire Wahrscheinlichkeit = Pinnacle-Quote ohne Marge. Tipp, wenn ein Buchmacher mindestens
+    {{ mv.min_edge | pct(0) }} mehr zahlt (max. Quote {{ mv.max_odds }}).</p>
+  <div class="grid grid-cols-2 gap-2 text-xs tabular mt-2">
+    <div>Wetten im Backtest: <b>{{ mv.bets }}</b></div><div>Ø Quote: <b>{{ mv.avg_odds | odds }}</b></div>
+    <div>ROI: <b class="{{ 'pos' if mv.roi > 0 else 'neg' }}">{{ mv.roi | pct }}</b></div>
+    <div>CLV: <b class="pos">{{ mv.clv | pct }}</b> (t = {{ '%.1f' | format(mv.clv_t) }})</div>
+  </div>
+  <div class="table-scroll"><table class="w-full text-xs tabular mt-2">
+    <tr class="muted text-left"><th>Saison</th><th>Wetten</th><th>ROI</th><th>CLV</th></tr>
+    {% for r in mv.per_season %}<tr class="border-t"><td>{{ r.season }}</td><td>{{ r.bets }}</td>
+      <td class="{{ 'pos' if r.roi > 0 else 'neg' }}">{{ r.roi | pct }}</td><td>{{ r.clv | pct }}</td></tr>{% endfor %}
+  </table></div>
+</div>
+{% endif %}
+<h2 class="font-bold">Eigenes Modell je Liga</h2>
 {% for code, s in summary.leagues.items() %}
 <div class="card p-4 text-sm">
   <div class="flex justify-between"><b>{{ leagues[code].name if code in leagues else code }}</b>
     <span class="{{ 'pos' if s.beats_market else 'warn' }}">{{ '✅ Tipps aktiv' if s.beats_market else '⛔ gesperrt' }}</span></div>
-  <table class="w-full tabular text-xs mt-2">
+  <div class="table-scroll"><table class="w-full tabular text-xs mt-2">
     <tr class="muted text-left"><th></th><th>Modell</th><th>Markt</th><th>Kombination</th></tr>
     <tr><td>Log Loss 1X2 ↓</td><td>{{ '%.4f' | format(s.ll_model) }}</td><td>{{ '%.4f' | format(s.ll_market) }}</td><td><b>{{ '%.4f' | format(s.ll_blend) }}</b></td></tr>
     <tr><td>Log Loss Ü/U ↓</td><td>–</td><td>{{ '%.4f' | format(s.ou_market) }}</td><td><b>{{ '%.4f' | format(s.ou_blend) }}</b></td></tr>
-  </table>
+  </table></div>
   <div class="text-xs mt-2 tabular">Backtest-Wetten: {{ s.bets }} · ROI <b class="{{ 'pos' if s.roi > 0 else 'neg' }}">{{ s.roi | pct }}</b>
     · Ø CLV {{ s.clv | pct }} · t-Wert {{ '%.2f' | format(s.t) }}</div>
   <div class="text-[11px] muted mt-1">Gewichte: Modell {{ s.w_dc }}, ELO {{ s.w_elo }}, Markt {{ '%.1f' | format(1 - s.w_dc - s.w_elo) }} · Ü/U Modell {{ s.w_ou }}</div>

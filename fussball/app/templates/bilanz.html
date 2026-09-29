@@ -31,7 +31,7 @@
   <table class="w-full text-sm tabular">
     <tr class="text-xs muted text-left"><th>Art</th><th>Anzahl</th><th>P/L</th><th>ROI</th></tr>
     {% for t, v in stats.by_type.items() %}
-    <tr class="border-t border-[#1f2a37]"><td>{{ {'single': 'Einzeltipps', 'combo': 'Kombis', 'system': 'Systemwetten'}.get(t, t) }}</td>
+    <tr class="border-t"><td>{{ {'single': 'Einzeltipps', 'combo': 'Kombis', 'system': 'Systemwetten'}.get(t, t) }}</td>
       <td>{{ v.n }}</td><td class="{{ 'pos' if v.pnl > 0 else 'neg' }}">{{ v.pnl | money(plan.currency) }}</td><td>{{ v.roi | pct }}</td></tr>
     {% else %}<tr><td colspan="4" class="muted">–</td></tr>{% endfor %}
   </table>

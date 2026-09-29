@@ -55,18 +55,19 @@ def create_app(engine=None, start_background: bool = True) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        tasks = []
+        tasks, jobs = [], None
         if start_background:
-            from fussball.app import jobs
+            try:
+                from fussball.app import jobs
 
-            tasks = await jobs.start(engine)
+                tasks = await jobs.start(engine)
+            except Exception:  # noqa: BLE001 – Web-App soll auch ohne Bot/Scheduler laufen
+                log.exception("Hintergrund-Jobs/Telegram konnten nicht starten")
+                jobs = None
         yield
         for t in tasks:
-            if hasattr(t, "cancel"):
-                t.cancel()
-        if start_background:
-            from fussball.app import jobs
-
+            t.cancel()
+        if jobs is not None:
             await jobs.stop()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)

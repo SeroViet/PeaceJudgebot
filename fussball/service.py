@@ -108,7 +108,21 @@ def update_data(engine: Engine) -> dict:
     except Exception as exc:  # noqa: BLE001
         log.exception("fixtures.csv fehlgeschlagen")
         fixtures = {"error": repr(exc)}
-    return {"seasons": results, "fixtures": fixtures, "at": utcnow().isoformat()}
+    odds_api = {}
+    from fussball.data.odds_api import OddsApiClient, import_odds
+
+    client = OddsApiClient()
+    if client.configured:
+        try:
+            with session_scope(engine) as s:
+                odds_api = import_odds(s, client, main)
+            odds_api["credits_left"] = client.remaining
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Odds API fehlgeschlagen")
+            odds_api = {"error": repr(exc)}
+    else:
+        odds_api = {"error": "ODDS_API_KEY fehlt – ohne Pinnacle-Quoten keine Tipps"}
+    return {"seasons": results, "fixtures": fixtures, "odds_api": odds_api, "at": utcnow().isoformat()}
 
 
 # ----------------------------------------------------------------------------- Prognosen
@@ -135,6 +149,8 @@ class MatchForecast:
     top_scores: list[tuple[str, float]] = field(default_factory=list)
     factors: list[str] = field(default_factory=list)
     league_ok: bool = True
+    mode: str = "markt"  # "modell" = Modell+Markt (Liga freigegeben), "markt" = faire Marktquote
+    reference: str | None = None  # PS | BFE | Avg
 
     def fair(self, sel: str) -> float:
         p = self.probs_1x2.get(sel) or self.probs_ou.get(sel)
@@ -182,7 +198,12 @@ def predict_upcoming(engine: Engine, days: int = 4, now: datetime | None = None)
                 & (wf["kickoff_utc"] <= now + timedelta(days=days))]
         if wf.empty:
             continue
-        w_dc, w_elo, w_ou = comp_sum.get("w_dc", 0.3), comp_sum.get("w_elo", 0.0), comp_sum.get("w_ou", 0.3)
+        model_ok = bool(comp_sum.get("beats_market", False))
+        mv_ok = bool(summary.get("market_value", {}).get("enabled", False))
+        if model_ok:
+            w_dc, w_elo, w_ou = comp_sum.get("w_dc", 0.0), comp_sum.get("w_elo", 0.0), comp_sum.get("w_ou", 0.0)
+        else:  # Modell ohne nachgewiesenen Vorteil: nur der faire Marktpreis zählt
+            w_dc = w_elo = w_ou = 0.0
         p1 = blend_1x2(wf, w_dc, w_elo)
         p2 = blend_ou(wf, w_ou)
         for idx, r in wf.iterrows():
@@ -191,7 +212,8 @@ def predict_upcoming(engine: Engine, days: int = 4, now: datetime | None = None)
             market = {k: r[f"mkt_{k}"] for k in "HDA"} if pd.notna(r.get("mkt_H")) else None
             market_ou = {k: r[f"mkt_{k}"] for k in "OU"} if pd.notna(r.get("mkt_O")) else None
             odds = {src: {k: float(r[f"{src}_{k}"]) for k in "HDAOU" if pd.notna(r.get(f"{src}_{k}"))}
-                    for src in ("avg", "max")}
+                    for src in ("avg", "max", "best")}
+            odds["books"] = {k: str(r[f"bestbook_{k}"]) for k in "HDAOU" if pd.notna(r.get(f"bestbook_{k}"))}
             probs_1x2 = {k: float(p1.loc[idx, f"p_{k}"]) for k in "HDA"}
             forecasts.append(MatchForecast(
                 match_id=int(r["match_id"]), comp=comp, comp_name=leagues[comp]["name"],
@@ -201,7 +223,8 @@ def predict_upcoming(engine: Engine, days: int = 4, now: datetime | None = None)
                 market_1x2=market, market_ou=market_ou, elo_diff=float(r["elo_diff"]), odds=odds,
                 other_markets={k: v for k, v in all_markets(m).items() if k not in ("1X2", "OU2.5")},
                 top_scores=correct_scores(m, 6), factors=_factors(r, None, market, model),
-                league_ok=bool(comp_sum.get("beats_market", False)),
+                league_ok=model_ok or (mv_ok and r.get("market_book") == "PS"),
+                mode="modell" if model_ok else "markt", reference=r.get("market_book"),
             ))  # fmt: skip
     forecasts.sort(key=lambda f: f.kickoff_utc)
     _store_predictions(engine, forecasts)
@@ -224,7 +247,13 @@ def _store_predictions(engine: Engine, forecasts: list[MatchForecast]) -> None:
                                      explanation={"factors": f.factors}, known_at=now))
 
 
-def tips_from_forecasts(forecasts: list[MatchForecast], price: str = "avg") -> list[Tip]:
+BOOK_NAMES = {"B365": "Bet365", "BW": "bwin", "WH": "William Hill", "1XB": "1xBet", "BFD": "Betfred",
+              "BV": "BetVictor", "PP": "Paddy Power", "SKB": "Sky Bet", "IW": "Interwetten", "VC": "VC Bet",
+              "UNI": "Unibet", "MAR": "Marathonbet", "888": "888sport", "BETC": "Betclic", "BTSS": "Betsson",
+              "TIP": "Tipico", "LEO": "LeoVegas", "NORD": "NordicBet", "COOL": "Coolbet", "BF": "Betfair Sportsbook"}
+
+
+def tips_from_forecasts(forecasts: list[MatchForecast], price: str = "best") -> list[Tip]:
     tips = []
     for f in forecasts:
         for market, line, probs, labels in (("1X2", 0.0, f.probs_1x2, LABELS_1X2), ("OU", 2.5, f.probs_ou, LABELS_OU)):
@@ -233,9 +262,11 @@ def tips_from_forecasts(forecasts: list[MatchForecast], price: str = "avg") -> l
                 odds = f.odds.get(price, {}).get(sel)
                 if not odds:
                     continue
+                book = f.odds.get("books", {}).get(sel, "") if price == "best" else ""
+                book = BOOK_NAMES.get(book, book) or ("Ø Markt" if price == "avg" else "Bestquote")
                 team = f" {f.home}" if sel == "H" else f" {f.away}" if sel == "A" else ""
                 tips.append(Tip(f.match_id, f"{f.home} – {f.away}", f.kickoff_utc.isoformat(), f.comp, market,
-                                line, sel, labels[sel] + team, p, odds, "Ø Markt" if price == "avg" else "Bestquote",
+                                line, sel, labels[sel] + team, p, odds, book,
                                 fair_odds=1 / p, market_prob=(mk or {}).get(sel)))
     return tips
 
@@ -255,7 +286,7 @@ def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | N
     forced = cfg.get("force_enabled_leagues", [])
     ok = [f for f in forecasts if f.league_ok or f.comp in forced or "*" in forced]
     blocked = sorted({f.comp for f in forecasts} - {f.comp for f in ok})
-    tips = tips_from_forecasts(ok)
+    tips = tips_from_forecasts(ok, price=cfg["singles"].get("price", "best"))
     staked_today, staked_week = _staked(engine)
     singles = select_singles(tips, cfg["singles"], cfg["bankroll"], staked_today, staked_week)
     combos = build_combos(tips, cfg["combos"])

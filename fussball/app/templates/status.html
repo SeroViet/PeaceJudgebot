@@ -12,7 +12,7 @@
   <h2 class="font-bold mb-2">Datenimporte</h2>
   <table class="w-full text-xs tabular">
     {% for l in logs %}
-    <tr class="border-t border-[#1f2a37]"><td>{{ l.at | local }}</td><td>{{ l.resource }}</td>
+    <tr class="border-t"><td>{{ l.at | local }}</td><td>{{ l.resource }}</td>
       <td class="{{ 'pos' if l.status == 'ok' else 'neg' }}">{{ l.status }}</td><td>{{ l.rows }}</td><td class="muted">{{ l.message or '' }}</td></tr>
     {% endfor %}
   </table>

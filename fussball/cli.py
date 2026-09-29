@@ -92,8 +92,16 @@ def _cmd_backtest(args) -> int:
     frame = bt.load_frame(engine)
     cfg = bt.ModelConfig(**bt.BEST_CONFIG)
     rules = bt.BetRules(min_edge=args.min_edge, price_col=args.price)
-    with ProcessPoolExecutor(max_workers=args.workers) as ex:
-        preds = dict(zip(codes, ex.map(bt.walk_forward, [frame] * len(codes), codes, [cfg] * len(codes))))
+    cache = get_settings().storage_dir / "backtest_cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    todo = [c for c in codes if args.reuse is False or not (cache / f"{c}.pkl").exists()]
+    if todo:
+        with ProcessPoolExecutor(max_workers=args.workers) as ex:
+            for code, p in zip(todo, ex.map(bt.walk_forward, [frame] * len(todo), todo, [cfg] * len(todo))):
+                p.to_pickle(cache / f"{code}.pkl")
+    import pandas as pd
+
+    preds = {c: pd.read_pickle(cache / f"{c}.pkl") for c in codes}
     summary = {"generated_at": bt.utcnow_iso(), "model_config": bt.BEST_CONFIG, "price": args.price,
                "min_edge": args.min_edge, "leagues": {}}
     for code, p in preds.items():
@@ -104,6 +112,12 @@ def _cmd_backtest(args) -> int:
               f"Ü/U Markt {s['ou_market']:.4f} Kombi {s['ou_blend']:.4f} | Wetten {s['bets']:>4} "
               f"ROI {s['roi']:+.1%} CLV {s['clv']:+.2%} t={s['t']:+.2f} | "
               f"{'AKTIV' if s['beats_market'] else 'gesperrt'}")
+    mv = bt.market_value_summary(frame, min_edge=args.min_edge)
+    summary["market_value"] = mv
+    print(f"Markt-Value (fair = Pinnacle, Wette zur besten Buchmacher-Quote, Edge ≥ {mv['min_edge']:.0%}): "
+          f"{mv['bets']} Wetten, ROI {mv['roi']:+.1%}, CLV {mv['clv']:+.2%} (t={mv['clv_t']:+.1f}), "
+          f"Gewinn-t={mv['t']:+.2f} → "
+          f"{'AKTIV' if mv['enabled'] else 'gesperrt'}")
     path = get_settings().storage_dir / "backtest_summary.json"
     path.write_text(json.dumps(summary, default=np_default, indent=2), encoding="utf-8")
     print(f"Gespeichert: {path}")
@@ -176,9 +190,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("backtest", help="Walk-Forward-Backtest; legt Gewichte und freigegebene Ligen fest")
     p.add_argument("--leagues", nargs="+")
-    p.add_argument("--min-edge", type=float, default=0.05)
+    p.add_argument("--min-edge", type=float, default=0.03)
     p.add_argument("--price", choices=["avg", "max"], default="avg")
     p.add_argument("--workers", type=int, default=4)
+    p.add_argument("--reuse", action="store_true", help="gespeicherte Prognosen wiederverwenden (nur Auswertung)")
     p.set_defaults(func=_cmd_backtest)
 
     p = sub.add_parser("refresh", help="Daten laden, Wetten abrechnen, Tipps berechnen")

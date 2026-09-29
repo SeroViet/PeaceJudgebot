@@ -213,4 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # httpx loggt jede Anfrage inkl. URL – bei Telegram steht dort der Bot-Token.
+    for noisy in ("httpx", "httpcore", "telegram.ext.Updater"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     return args.func(args)

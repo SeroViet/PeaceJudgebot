@@ -39,3 +39,5 @@ services:
         value: "60"
       - key: ODDS_API_INTERVAL_HOURS
         value: "24"
+      - key: ODDS_API_DAILY_CREDITS
+        value: "16"

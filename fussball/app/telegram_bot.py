@@ -102,7 +102,8 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
         for c in [c for c in combos if c["day"] == day]:
             d = _fmt_day(c["legs"][0]["kickoff"])
             icon = {"bestätigt": " ✅", "vorsicht": " ⚠️", "streichen": " ❌"}
-            legs = "\n".join(f"  {i}. {state.local(l['kickoff']).strftime('%H:%M')} {l['match']}\n"
+            legs = "\n".join(f"  {i}. {state.local(l['kickoff']).strftime('%H:%M')} {l['match']}"
+                              f" <i>({l.get('comp_name') or l.get('comp', '')})</i>\n"
                               f"     ➡️ <b>{l['label']}</b> ({l['prob']:.0%})"
                               f"{icon.get((l.get('agent') or {}).get('assessment'), '')}"
                               for i, l in enumerate(c["legs"], 1))
@@ -111,6 +112,32 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
                        f"Nur spielen, wenn Sporttip ≥ {c['fair_odds']:.2f} zahlt.\n"
                        f"<i>Backtest {c['size']}er: {DAY_BT.get(str(c['size']), '')}</i>")
     return "\n\n".join(out)
+
+
+def format_today(plan: dict) -> str:
+    """Tagesreport: Kombi für heute; sonst ehrlich melden und die nächste zeigen."""
+    from datetime import datetime
+
+    today = datetime.now(state.TZ).date().isoformat()
+    combos = plan.get("day_combos", [])
+    if any(c["day"] == today for c in combos):
+        return format_day_combos({**plan, "day_combos": [c for c in combos if c["day"] == today]}, max_days=1)
+    upcoming = sorted({c["day"] for c in combos if c["day"] > today})
+    msg = "📭 Heute gibt es weltweit keine 5 Spiele mit genügend sicheren Pinnacle-Tipps (75–88 %)."
+    if upcoming:
+        return msg + "\nNächste Tageskombi:\n\n" + format_day_combos(
+            {**plan, "day_combos": [c for c in combos if c["day"] == upcoming[0]]}, max_days=1)
+    return msg + " Sobald neue Spiele Quoten haben, melde ich mich."
+
+
+def format_combo_result(c: dict) -> str:
+    won = all(r["won"] for r in c["results"] if r["won"] is not None)
+    head = "🏆 <b>Tageskombi GEWONNEN</b>" if won else "📉 <b>Tageskombi verloren</b>"
+    lines = [f"{head} ({c['size']}er, {c['day']}): <b>{c['correct']} von {c['size']} richtig</b>"]
+    for r in c["results"]:
+        icon = "✅" if r["won"] else "➖" if r["won"] is None else "❌"
+        lines.append(f"{icon} {r['match']} {r['score']} · {r['label']}")
+    return "\n".join(lines)
 
 
 def format_combos(plan: dict) -> str:
@@ -240,7 +267,13 @@ def build(engine) -> Application | None:
         await reply(update, res[0]["text"] if res else "Tagesbudget der Agenten erreicht – morgen wieder.")
 
     async def cmd_day(update: Update, _ctx):
-        await reply(update, format_day_combos(state.load_plan()))
+        plan = state.load_plan()
+        await reply(update, format_today(plan))
+        later = [c for c in plan.get("day_combos", []) if c["day"] > __import__("datetime").datetime.now(state.TZ)
+                 .date().isoformat()]
+        if later and any(c["day"] == __import__("datetime").datetime.now(state.TZ).date().isoformat()
+                         for c in plan.get("day_combos", [])):
+            await reply(update, "Weitere Tage:\n\n" + format_day_combos({**plan, "day_combos": later}, max_days=2))
 
     async def cmd_safe(update: Update, _ctx):
         await reply(update, format_safe(state.load_plan(), limit=40))

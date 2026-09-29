@@ -111,32 +111,7 @@ def update_data(engine: Engine) -> dict:
     except Exception as exc:  # noqa: BLE001
         log.exception("fixtures.csv fehlgeschlagen")
         fixtures = {"error": repr(exc)}
-    odds_api = {}
-    from fussball.data.odds_api import OddsApiClient, import_odds
-
-    client = OddsApiClient()
-    interval_h = float(os.getenv("ODDS_API_INTERVAL_HOURS", "24"))
-    with session_scope(engine) as s:
-        last = s.get(AppSetting, "odds_api_last")
-        last_at = datetime.fromisoformat(last.value) if last and isinstance(last.value, str) else None
-    due = last_at is None or utcnow() - last_at >= timedelta(hours=interval_h)
-    if client.configured and not due:
-        odds_api = {"skipped": f"letzter Abruf {last_at:%d.%m. %H:%M} UTC, Intervall {interval_h:g} h (Credits sparen)"}
-    elif client.configured:
-        try:
-            with session_scope(engine) as s:
-                odds_api = import_odds(s, client, main)
-                row = s.get(AppSetting, "odds_api_last")
-                if row:
-                    row.value = utcnow().isoformat()
-                else:
-                    s.add(AppSetting(key="odds_api_last", value=utcnow().isoformat()))
-            odds_api["credits_left"] = client.remaining
-        except Exception as exc:  # noqa: BLE001
-            log.exception("Odds API fehlgeschlagen")
-            odds_api = {"error": repr(exc)}
-    else:
-        odds_api = {"error": "ODDS_API_KEY fehlt – ohne Pinnacle-Quoten keine Tipps"}
+    odds_api = world_scan(engine)
     return {"seasons": results, "fixtures": fixtures, "odds_api": odds_api, "at": utcnow().isoformat()}
 
 
@@ -252,6 +227,108 @@ def predict_upcoming(engine: Engine, days: int = 4, now: datetime | None = None)
     return forecasts
 
 
+def _odds_state(engine: Engine) -> dict:
+    today = utcnow().date().isoformat()
+    with session_scope(engine) as s:
+        row = s.get(AppSetting, "odds_api_state")
+        st = dict(row.value) if row and isinstance(row.value, dict) else {}
+    if st.get("day") != today:
+        st = {"day": today, "spent": 0, "last": st.get("last", {})}
+    return st
+
+
+def _save_odds_state(engine: Engine, st: dict) -> None:
+    with session_scope(engine) as s:
+        row = s.get(AppSetting, "odds_api_state")
+        if row:
+            row.value = st
+        else:
+            s.add(AppSetting(key="odds_api_state", value=st))
+
+
+def world_scan(engine: Engine, hours: float = 30.0) -> dict:
+    """Alle Fussball-Wettbewerbe weltweit (inkl. Nations League, WM-Quali) nach Spielen in den
+    nächsten `hours` Stunden durchsuchen (gratis) und für die Wettbewerbe mit den meisten
+    Spielen Quoten holen (2 Credits je Wettbewerb), innerhalb des Tagesbudgets.
+    Danach Ergebnisse für Wettbewerbe mit offenen, vergangenen Spielen (2 Credits)."""
+    from fussball.data.odds_api import OddsApiClient, import_generic, import_scores, upcoming_counts
+
+    client = OddsApiClient()
+    if not client.configured:
+        return {"error": "ODDS_API_KEY fehlt – ohne Pinnacle-Quoten keine Tipps"}
+    budget = int(os.getenv("ODDS_API_DAILY_CREDITS", "16"))
+    interval = float(os.getenv("ODDS_API_INTERVAL_HOURS", "24"))
+    st = _odds_state(engine)
+    out: dict = {"fetched": {}, "scores": {}}
+    try:
+        # Ergebnisse zuerst: offene Spiele (Quelle odds-api), deren Anpfiff > 2.5 h her ist
+        from fussball.data.schema import Competition
+
+        with session_scope(engine) as s:
+            due = s.execute(select(Competition.code).join(Match, Match.competition_id == Competition.id).where(
+                Match.status == "scheduled", Match.source == "odds-api",
+                Match.kickoff_utc < utcnow() - timedelta(hours=2.5),
+                Match.kickoff_utc > utcnow() - timedelta(days=3)).distinct()).scalars().all()
+        from fussball.data.odds_api import SPORT_KEYS
+
+        for code in due:
+            if st["spent"] + 2 > budget:
+                break
+            sport = SPORT_KEYS.get(code, code)
+            with session_scope(engine) as s:
+                out["scores"][sport] = import_scores(s, client, sport)
+            st["spent"] += 2
+        for sport, title, n in upcoming_counts(client, hours):
+            last = st["last"].get(sport)
+            if last and utcnow() - datetime.fromisoformat(last) < timedelta(hours=interval):
+                continue
+            if st["spent"] + 2 > budget:
+                out.setdefault("skipped", []).append(f"{title} ({n})")
+                continue
+            with session_scope(engine) as s:
+                out["fetched"][title] = import_generic(s, client, sport, title)
+            st["spent"] += 2
+            st["last"][sport] = utcnow().isoformat()
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Weltweiter Scan fehlgeschlagen")
+        out["error"] = repr(exc)
+    finally:
+        _save_odds_state(engine, st)
+    out.update(credits_today=st["spent"], credits_left=client.remaining)
+    return out
+
+
+def market_forecasts(engine: Engine, hours: float = 72.0, now: datetime | None = None) -> list[MatchForecast]:
+    """Prognosen allein aus Pinnacle-Quoten – für jeden Wettbewerb weltweit, ohne Historie."""
+    from fussball.data.schema import Competition, Odds
+    from fussball.models.implied import fit_rates, implied_markets
+
+    now = now or utcnow()
+    out = []
+    with session_scope(engine) as s:
+        rows = s.execute(select(Match, Competition.code, Competition.name).join(
+            Competition, Competition.id == Match.competition_id).where(
+            Match.status == "scheduled", Match.kickoff_utc > now, Match.kickoff_utc <= now + timedelta(hours=hours))
+        ).all()
+        for m, code, cname in rows:
+            prices: dict[str, float] = {}
+            for sel, price in s.execute(select(Odds.selection, Odds.price).where(
+                    Odds.match_id == m.id, Odds.bookmaker == "PS", Odds.market == "1X2",
+                    Odds.is_closing.is_(False)).order_by(Odds.known_at)).all():
+                prices[sel] = price
+            if set(prices) != {"H", "D", "A"}:
+                continue
+            p1 = dict(zip("HDA", fair_probs([prices["H"], prices["D"], prices["A"]])))
+            tot = pinnacle_total(s, m.id)
+            lam, mu = fit_rates(p1, *(tot if tot else (None, None)))
+            home, away = s.get(Team, m.home_team_id).name, s.get(Team, m.away_team_id).name
+            implied = implied_markets(lam, mu)
+            out.append(MatchForecast(m.id, code, cname, m.kickoff_utc, home, away, lam, mu, p1,
+                                     implied["OU2.5"], p1, p1, None, 0.0, {}, league_ok=True, mode="markt",
+                                     reference="PS", implied=implied, implied_rates=(lam, mu)))
+    return sorted(out, key=lambda f: f.kickoff_utc)
+
+
 def pinnacle_total(session, match_id: int) -> tuple[float, float] | None:
     """(Linie, faire P(Über)) der jüngsten Pinnacle-Tore-Linie, bevorzugt nahe 2.5."""
     from fussball.data.schema import Odds
@@ -334,8 +411,8 @@ def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob
             continue
         p, market, sel = max(cands)
         out.append({"match_id": f.match_id, "match": f"{f.home} – {f.away}", "kickoff": f.kickoff_utc.isoformat(),
-                    "comp": f.comp, "market": market, "selection": sel, "label": label(market, sel, f.home, f.away),
-                    "prob": p, "fair_odds": 1 / p})
+                    "comp": f.comp, "comp_name": f.comp_name, "market": market, "selection": sel,
+                    "label": label(market, sel, f.home, f.away), "prob": p, "fair_odds": 1 / p})
     return out
 
 
@@ -389,13 +466,58 @@ def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: floa
         if not new_excl:
             break
         excluded |= new_excl
-        plan.day_combos = day_combos([f for f in plan.forecasts if f.match_id not in excluded],
+        plan.day_combos = day_combos([f for f in (plan.all_forecasts or plan.forecasts) if f.match_id not in excluded],
                                      tuple(dc.get("sizes", [5, 6])), dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
     for c in plan.day_combos:
         for leg in c["legs"]:
             if leg["match_id"] in results:
                 leg["agent"] = {k: results[leg["match_id"]][k] for k in ("assessment", "reason")}
     return [{**r, "removed": r["match_id"] in excluded} for r in results.values()]
+
+
+def record_served(engine: Engine, combos: list[dict]) -> None:
+    """Gesendete Tageskombis merken (erste Version pro Tag und Grösse), um sie auszuwerten."""
+    with session_scope(engine) as s:
+        row = s.get(AppSetting, "served_combos")
+        hist = dict(row.value) if row and isinstance(row.value, dict) else {}
+        for c in combos:
+            key = f"{c['day']}_{c['size']}"
+            if key not in hist:
+                hist[key] = {"day": c["day"], "size": c["size"], "fair_odds": c["fair_odds"], "prob": c["prob"],
+                             "legs": [{k: l[k] for k in ("match_id", "match", "market", "selection", "label")}
+                                      for l in c["legs"]], "done": False}
+        if row:
+            row.value = hist
+        else:
+            s.add(AppSetting(key="served_combos", value=hist))
+
+
+def evaluate_served(engine: Engine) -> list[dict]:
+    """Tageskombis auswerten, deren Spiele alle beendet sind (einmalig)."""
+    from fussball.models.implied import outcome
+
+    done = []
+    with session_scope(engine) as s:
+        row = s.get(AppSetting, "served_combos")
+        if not row or not isinstance(row.value, dict):
+            return []
+        hist = dict(row.value)
+        for key, c in hist.items():
+            if c.get("done"):
+                continue
+            results = []
+            for leg in c["legs"]:
+                m = s.get(Match, leg["match_id"])
+                if m is None or m.status != "finished" or m.ft_home is None:
+                    break
+                results.append({**leg, "score": f"{m.ft_home}:{m.ft_away}",
+                                "won": outcome(leg["market"], leg["selection"], m.ft_home, m.ft_away)})
+            else:
+                c = {**c, "done": True, "results": results, "correct": sum(bool(r["won"]) for r in results)}
+                hist[key] = c
+                done.append(c)
+        row.value = hist
+    return done
 
 
 def split_market(market: str) -> tuple[str, float]:
@@ -459,6 +581,7 @@ class DailyPlan:
     blocked_leagues: list[str]
     safe: list[dict] = field(default_factory=list)
     day_combos: list[dict] = field(default_factory=list)
+    all_forecasts: list = field(default_factory=list)
 
 
 def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | None = None) -> DailyPlan:
@@ -471,11 +594,16 @@ def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | N
     staked_today, staked_week = _staked(engine)
     singles = select_singles(tips, cfg["singles"], cfg["bankroll"], staked_today, staked_week)
     combos = build_combos(tips, cfg["combos"])
+    world = {f.match_id: f for f in market_forecasts(engine, hours=24 * days)}
+    world.update({f.match_id: f for f in forecasts if f.implied})
+    all_fc = sorted(world.values(), key=lambda f: f.kickoff_utc)
     sc = cfg.get("safe", {})
-    safe = safe_tips(forecasts, sc.get("min_prob", 0.70), sc.get("max_prob", 0.90), sc.get("per_match", 2))
+    safe = safe_tips(all_fc, sc.get("min_prob", 0.70), sc.get("max_prob", 0.90), sc.get("per_match", 2))
     dc = cfg.get("day_combo", {})
-    days = day_combos(forecasts, tuple(dc.get("sizes", [5, 6])), dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
-    return DailyPlan(forecasts, singles, combos, cfg, blocked, safe, days)
+    days_ = day_combos(all_fc, tuple(dc.get("sizes", [5, 6])), dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
+    plan = DailyPlan(forecasts, singles, combos, cfg, blocked, safe, days_)
+    plan.all_forecasts = all_fc
+    return plan
 
 
 def _staked(engine: Engine) -> tuple[float, float]:

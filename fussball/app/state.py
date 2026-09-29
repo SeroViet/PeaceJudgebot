@@ -92,6 +92,8 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3) -> dict:
             log.exception("Agenten fehlgeschlagen")
             info["agent"] = []
         data = serialize_plan(plan)
+        service.record_served(engine, plan.day_combos)
+        info["combo_results"] = service.evaluate_served(engine)
         path = plan_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, default=service.np_default, ensure_ascii=False), encoding="utf-8")

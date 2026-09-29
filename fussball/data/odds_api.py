@@ -236,3 +236,115 @@ def import_odds(session: Session, client: OddsApiClient, league_codes: list[str]
         out[code] = len(rows)
     log.info("Odds API: %s, verbleibende Credits %s", out, client.remaining)
     return out
+
+
+# ----------------------------------------------------------------------------- weltweiter Modus
+# Ligen ausserhalb der football-data-Historie: Teams/Spiele werden aus The Odds API angelegt.
+# Für Sicher-Tipps und Tageskombis reicht die Pinnacle-Quote (markt-implizite Torverteilung).
+
+def _get(client: OddsApiClient, path: str, **params) -> tuple[list | dict, dict]:
+    resp = client.session.get(f"{BASE_URL}/{path}", params={"apiKey": client.api_key, **params}, timeout=30)
+    if "x-requests-remaining" in resp.headers:
+        client.remaining = int(resp.headers["x-requests-remaining"])
+    resp.raise_for_status()
+    return resp.json(), resp.headers
+
+
+def soccer_sports(client: OddsApiClient) -> list[dict]:
+    """Alle aktiven Fussball-Wettbewerbe (kostenlos)."""
+    data, _ = _get(client, "sports")
+    return [s for s in data if s.get("group") == "Soccer" and not s.get("has_outrights")]
+
+
+def upcoming_counts(client: OddsApiClient, hours: float = 30.0) -> list[tuple[str, str, int]]:
+    """(sport_key, Titel, Anzahl Spiele in den nächsten `hours` Stunden) – kostenlos."""
+    now = utcnow()
+    out = []
+    for s in soccer_sports(client):
+        try:
+            events, _ = _get(client, f"sports/{s['key']}/events")
+        except requests.HTTPError:
+            continue
+        n = sum(1 for e in events if now < datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00"))
+                .replace(tzinfo=None) <= now + timedelta(hours=hours))
+        if n:
+            out.append((s["key"], s["title"], n))
+    return sorted(out, key=lambda x: -x[2])
+
+
+def _competition(session: Session, sport_key: str, title: str) -> int:
+    code = next((c for c, k in SPORT_KEYS.items() if k == sport_key), sport_key[:32])
+    now = utcnow()
+    kind = "international" if any(w in sport_key for w in ("nations", "world_cup", "euro", "uefa_champs", "fifa")) \
+        else "league"
+    upsert(session, Competition, [{"code": code, "name": title, "kind": kind, "created_at": now, "updated_at": now}],
+           ["code"], update_cols=[])
+    return session.execute(select(Competition.id).where(Competition.code == code)).scalar_one()
+
+
+def _team(session: Session, name: str) -> int:
+    alias = session.execute(select(TeamAlias.team_id).where(TeamAlias.source == SOURCE, TeamAlias.alias == name)
+                            ).scalar_one_or_none()
+    if alias is not None:
+        return alias
+    now = utcnow()
+    upsert(session, Team, [{"name": name, "created_at": now, "updated_at": now}], ["name"], update_cols=[])
+    tid = session.execute(select(Team.id).where(Team.name == name)).scalar_one()
+    upsert(session, TeamAlias, [{"team_id": tid, "source": SOURCE, "alias": name}], ["source", "alias"], update_cols=[])
+    return tid
+
+
+def import_generic(session: Session, client: OddsApiClient, sport_key: str, title: str) -> int:
+    """Quoten eines beliebigen Wettbewerbs; Spiele/Teams werden bei Bedarf angelegt (2 Credits)."""
+    from fussball.cli import current_season_code
+    from fussball.data.football_data import season_label
+
+    if sport_key in SPORT_KEYS.values():  # Top-Ligen: Zuordnung zu football-data-Teams
+        code = next(c for c, k in SPORT_KEYS.items() if k == sport_key)
+        return import_odds(session, client, [code]).get(code, 0)
+    comp_id = _competition(session, sport_key, title)
+    fetched_at = utcnow()
+    rows = []
+    for ev in client.odds(sport_key):
+        kickoff = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00")).replace(tzinfo=None)
+        home, away = _team(session, ev["home_team"]), _team(session, ev["away_team"])
+        season = season_label(current_season_code(kickoff.date()))
+        now = utcnow()
+        upsert(session, Match, [{"competition_id": comp_id, "season": season, "kickoff_utc": kickoff,
+                                 "kickoff_time_known": True, "home_team_id": home, "away_team_id": away,
+                                 "status": "scheduled", "known_at": kickoff + timedelta(hours=2, minutes=15),
+                                 "neutral_venue": False, "source": SOURCE, "created_at": now, "updated_at": now}],
+               ["competition_id", "season", "home_team_id", "away_team_id"], update_cols=["kickoff_utc", "updated_at"])
+        mid = session.execute(select(Match.id).where(Match.competition_id == comp_id, Match.season == season,
+                                                     Match.home_team_id == home, Match.away_team_id == away)
+                              ).scalar_one()
+        rows += [{**r, "match_id": mid, "source": SOURCE} for r in event_rows(ev, fetched_at)]
+    upsert(session, Odds, rows, ["match_id", "bookmaker", "market", "line", "selection", "is_closing", "source"],
+           update_cols=["price", "known_at"])
+    return len(rows)
+
+
+def import_scores(session: Session, client: OddsApiClient, sport_key: str, days_from: int = 2) -> int:
+    """Endstände der letzten Tage (2 Credits) → Spiele auf 'finished' setzen."""
+    data, _ = _get(client, f"sports/{sport_key}/scores", daysFrom=days_from)
+    n = 0
+    for ev in data:
+        if not ev.get("completed") or not ev.get("scores"):
+            continue
+        score = {s["name"]: int(s["score"]) for s in ev["scores"]}
+        if ev["home_team"] not in score or ev["away_team"] not in score:
+            continue
+        ids = [session.execute(select(TeamAlias.team_id).where(TeamAlias.source == SOURCE, TeamAlias.alias == t))
+               .scalar_one_or_none() for t in (ev["home_team"], ev["away_team"])]
+        if None in ids:
+            continue
+        kickoff = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00")).replace(tzinfo=None)
+        m = session.execute(select(Match).where(Match.home_team_id == ids[0], Match.away_team_id == ids[1],
+                                                Match.kickoff_utc.between(kickoff - timedelta(hours=36),
+                                                                          kickoff + timedelta(hours=36)))).scalar_one_or_none()
+        if m is None or m.status == "finished":
+            continue
+        m.ft_home, m.ft_away = score[ev["home_team"]], score[ev["away_team"]]
+        m.status, m.known_at = "finished", utcnow()
+        n += 1
+    return n

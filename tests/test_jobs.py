@@ -28,3 +28,12 @@ def test_telegram_formatters():
     assert "Kein" in telegram_bot.format_singles({**PLAN, "singles": []})
     assert "Keine Kombi" in telegram_bot.format_combos(PLAN)
     assert "Kein Spiel" in telegram_bot.format_match(PLAN, "Bayern")
+
+
+def test_combo_result_and_today_formatting():
+    c = {"size": 5, "day": "2026-10-01", "correct": 4, "results": [
+        {"won": True, "match": "A – B", "score": "2:1", "label": "Über 1.5 Tore"},
+        {"won": False, "match": "C – D", "score": "0:0", "label": "Über 1.5 Tore"}]}
+    text = telegram_bot.format_combo_result(c)
+    assert "verloren" in text and "4 von 5 richtig" in text and "❌ C – D 0:0" in text
+    assert "keine 5 Spiele" in telegram_bot.format_today({"day_combos": []})

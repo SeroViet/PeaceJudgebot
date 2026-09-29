@@ -76,6 +76,8 @@ async def _refresh_loop(engine):
         try:
             info = await loop.run_in_executor(None, lambda: state.refresh(engine, days=int(os.getenv("TIP_DAYS", "3"))))
             plan = state.load_plan()
+            for c in info.get("combo_results", []):
+                await telegram_bot.notify(_bot, telegram_bot.format_combo_result(c))
             new_intel = [a for a in info.get("agent", []) if not a.get("cached")]
             for a in new_intel:
                 await telegram_bot.notify(_bot, a["text"] + ("\n\n🔁 Aus der Tageskombi gestrichen, Ersatz rückt nach."
@@ -113,7 +115,7 @@ async def _daily_loop():
         plan = state.load_plan()
         await telegram_bot.notify(_bot, "☀️ <b>Tipps des Tages</b>\n\n" + telegram_bot.format_singles(plan)
                                   + "\n\n" + telegram_bot.format_combos(plan))
-        await telegram_bot.notify(_bot, telegram_bot.format_day_combos(plan, max_days=1))
+        await telegram_bot.notify(_bot, "☀️ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))
         await telegram_bot.notify(_bot, telegram_bot.format_safe(plan))
         await asyncio.sleep(60)
 

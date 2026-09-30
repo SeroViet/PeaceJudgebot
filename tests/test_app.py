@@ -137,3 +137,18 @@ def test_diff_plans_detects_changes():
     changes = state.diff_plans(old, new)
     assert any("Neu" in c for c in changes) and any("Gestrichen" in c for c in changes)
     _ = timedelta
+
+
+def test_lite_mode_skips_history(monkeypatch):
+    from fussball import service
+    from fussball.app import state
+
+    monkeypatch.delenv("FULL_MODEL", raising=False)
+    monkeypatch.setattr(service, "world_scan", lambda engine: {"fetched": {}})
+    monkeypatch.setattr(service.football_data, "run_import",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("Historie im Sparmodus")))
+    assert service.lite_mode()
+    assert service.update_data(None)["odds_api"] == {"fetched": {}}
+    assert state.needs_bootstrap(None) is False
+    monkeypatch.setenv("FULL_MODEL", "1")
+    assert not service.lite_mode()

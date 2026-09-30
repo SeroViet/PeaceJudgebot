@@ -5,6 +5,9 @@
   → Alarm bei neuen/gestrichenen Tipps, Ergebnis jeder abgerechneten Wette
 - täglich um DAILY_REPORT_TIME (Europe/Zurich, Standard 09:00): Tipps des Tages
 - REMINDER_MINUTES (Standard 60) vor Anpfiff: Erinnerung mit Mindestquote
+- nach dem ersten Durchlauf nach dem Start: Tageskombi von heute (STARTUP_TIPS=0 schaltet ab)
+- Render-Gratisplan: alle 10 Minuten /healthz über die öffentliche Adresse aufrufen, damit der
+  Dienst nicht nach 15 Minuten ohne Besucher einschläft (KEEP_AWAKE=0 schaltet ab)
 """
 
 from __future__ import annotations
@@ -40,8 +43,24 @@ async def start(engine) -> list:
                                         "Ergebnissen. /start zeigt alle Befehle.")
     if os.getenv("DISABLE_SCHEDULER") == "1":
         return []
-    return [asyncio.create_task(_refresh_loop(engine)), asyncio.create_task(_daily_loop()),
-            asyncio.create_task(_reminder_loop(engine))]
+    tasks = [asyncio.create_task(_refresh_loop(engine)), asyncio.create_task(_daily_loop()),
+             asyncio.create_task(_reminder_loop(engine))]
+    url = os.getenv("RENDER_EXTERNAL_URL")
+    if url and os.getenv("KEEP_AWAKE", "1") == "1":
+        tasks.append(asyncio.create_task(_keep_awake(url)))
+    return tasks
+
+
+async def _keep_awake(base_url: str, every_s: int = 600):
+    import requests
+
+    loop = asyncio.get_running_loop()
+    while True:
+        await asyncio.sleep(every_s)
+        try:
+            await loop.run_in_executor(None, lambda: requests.get(base_url.rstrip("/") + "/healthz", timeout=20))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Keep-awake fehlgeschlagen: %s", exc)
 
 
 async def stop() -> None:
@@ -72,6 +91,7 @@ async def _refresh_loop(engine):
         except Exception:  # noqa: BLE001
             log.exception("Erststart fehlgeschlagen")
     every = float(os.getenv("REFRESH_HOURS", "3"))
+    first = os.getenv("STARTUP_TIPS", "1") == "1"
     while True:
         try:
             info = await loop.run_in_executor(None, lambda: state.refresh(engine, days=int(os.getenv("TIP_DAYS", "3"))))
@@ -93,6 +113,9 @@ async def _refresh_loop(engine):
             odds_err = (info.get("update") or {}).get("odds_api", {}).get("error")
             if odds_err:
                 log.warning("Odds API: %s", odds_err)
+            if first:
+                first = False
+                await telegram_bot.notify(_bot, "⚽ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))
         except Exception as exc:  # noqa: BLE001
             log.exception("Refresh fehlgeschlagen")
             await telegram_bot.notify(_bot, f"⚠️ Aktualisierung fehlgeschlagen: {exc!r}"[:500])

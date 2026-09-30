@@ -112,6 +112,8 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3) -> dict:
 def needs_bootstrap(engine: Engine, min_matches: int = 1000) -> bool:
     from sqlalchemy import func, select
 
+    if service.lite_mode():
+        return False
     from fussball.data.db import session_scope
     from fussball.data.schema import Match
 

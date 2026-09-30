@@ -92,9 +92,19 @@ def enabled_leagues(engine: Engine) -> list[str]:
 # ----------------------------------------------------------------------------- Daten
 
 
+def lite_mode() -> bool:
+    """Sparmodus (Standard): nur Pinnacle-Quoten weltweit, ohne Liga-Historie und eigenes Modell.
+    Braucht ~150 MB statt >1 GB RAM und reicht für Tageskombis und sichere Tipps, weil das eigene
+    Modell im Backtest ohnehin in keiner Liga freigegeben ist. FULL_MODEL=1 schaltet alles ein."""
+    return os.getenv("FULL_MODEL", "0") != "1"
+
+
 def update_data(engine: Engine) -> dict:
     """Laufende Saison (inkl. 2. Ligen für Aufsteiger) und kommende Spiele laden."""
     from fussball.models.backtest import RELATED_LEAGUES
+
+    if lite_mode():
+        return {"odds_api": world_scan(engine), "at": utcnow().isoformat()}
 
     settings = get_settings()
     leagues = load_leagues()
@@ -586,7 +596,8 @@ class DailyPlan:
 
 def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | None = None) -> DailyPlan:
     cfg = get_config(engine)
-    forecasts = forecasts if forecasts is not None else predict_upcoming(engine, days=days)
+    if forecasts is None:
+        forecasts = [] if lite_mode() else predict_upcoming(engine, days=days)
     forced = cfg.get("force_enabled_leagues", [])
     ok = [f for f in forecasts if f.league_ok or f.comp in forced or "*" in forced]
     blocked = sorted({f.comp for f in forecasts} - {f.comp for f in ok})

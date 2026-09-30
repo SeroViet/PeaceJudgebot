@@ -50,10 +50,14 @@ class TeamIntel(BaseModel):
 class MatchIntel(BaseModel):
     home: TeamIntel
     away: TeamIntel
+    goal_trend: str = Field(default="", description="Tore: Schnitt der letzten Spiele beider Teams (erzielt/kassiert), "
+                                                    "xG falls bekannt, direkte Duelle, Spielstil (offensiv/defensiv)")
     tip_assessment: Literal["bestätigt", "vorsicht", "streichen"]
     tip_reason: str = Field(description="Kurze Begründung, warum der Tipp bestätigt, riskant oder zu streichen ist")
     summary: str = Field(description="2-3 Sätze Zusammenfassung auf Deutsch")
     sources: list[str] = Field(description="URLs der wichtigsten Quellen")
+    best_tip: str | None = Field(default=None, description="Aus der Liste der möglichen Tipps genau der Text des "
+                                                            "Tipps, den die Fakten am besten stützen; sonst null")
 
 
 @dataclass
@@ -74,6 +78,8 @@ Recherchiere mit der Websuche aktuelle, verlässliche Informationen zum genannte
 - Belastung/Müdigkeit: Spiele in den letzten 7-14 Tagen (inkl. Europapokal, Pokal, Länderspiele),
   Reisen, angekündigte Rotation
 - Motivation: Tabellensituation, Bedeutung des Spiels, Trainerwechsel, Unruhe
+- Tore: erzielte und kassierte Tore der letzten 5 Spiele beider Teams, xG falls verfügbar,
+  direkte Duelle, Spielstil (offensiv, defensiv, Konter), Wetter/Platz falls auffällig
 Suche auch in der Landessprache der Teams (z. B. Deutsch, Englisch, Italienisch, Spanisch,
 Französisch). Bevorzuge offizielle Vereinsseiten, Pressekonferenzen und grosse Sportmedien.
 Gehe mit den Suchen sparsam um: zuerst gezielt nach Vorbericht/Team-News beider Teams,
@@ -82,6 +88,8 @@ finden ist, sage das.
 Bewerte danach den vorgegebenen Tipp nur anhand dieser Fakten: Ändern die Ausfälle,
 Aufstellung oder Belastung etwas Wesentliches (z. B. Torjäger fehlt bei einem Über-Tipp,
 Stammtorhüter gesperrt bei einem Unter-Tipp, B-Elf wegen Rotation beim Favoriten)?
+Gibt es eine Liste möglicher Tipps, sage am Ende, welcher davon am besten zu den Fakten passt
+(z. B. beide Abwehrreihen geschwächt → eher Über-Tipp; Favorit rotiert → eher Tore-Tipp statt Sieg).
 Nenne keine eigenen Wahrscheinlichkeiten und keine Quoten."""
 
 
@@ -97,8 +105,13 @@ def _count_searches(content) -> int:
                and getattr(b, "name", "") == "web_search")
 
 
+def _options(alternatives: list[str] | None) -> str:
+    return ("\nMögliche Tipps (alle laut Markt sicher genug):\n" + "\n".join(f"- {a}" for a in alternatives)
+            if alternatives else "")
+
+
 def research(client, match: str, kickoff_local: str, competition: str, tip: str, context: str,
-             model: str = MODEL, max_searches: int = 8) -> tuple[str, float, int]:
+             model: str = MODEL, max_searches: int = 10, alternatives: list[str] | None = None) -> tuple[str, float, int]:
     """Schritt 1: Websuche. Gibt (Rechercheergebnis als Text, Kosten, Anzahl Suchen) zurück."""
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -107,7 +120,7 @@ def research(client, match: str, kickoff_local: str, competition: str, tip: str,
     user = (f"Heute ist {today} (Schweizer Zeit). Nutze nur Informationen, die für dieses Spiel aktuell sind; "
             "Artikel aus früheren Saisons oder vor dem letzten Spiel der Teams ignorieren.\n"
             f"Spiel: {match}\nWettbewerb: {competition}\nAnstoss (Schweizer Zeit): {kickoff_local}\n"
-            f"Zu prüfender Tipp: {tip}\nBekannte Daten aus unserer Datenbank:\n{context}\n\n"
+            f"Zu prüfender Tipp: {tip}{_options(alternatives)}\nBekannte Daten aus unserer Datenbank:\n{context}\n\n"
             "Recherchiere jetzt und fasse alle Fakten mit Quellen-URLs zusammen.")
     messages = [{"role": "user", "content": user}]
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches}]
@@ -130,15 +143,17 @@ def research(client, match: str, kickoff_local: str, competition: str, tip: str,
     raise RuntimeError("Recherche nach mehreren Fortsetzungen nicht abgeschlossen")
 
 
-def structure(client, research_text: str, match: str, tip: str, model: str = MODEL) -> tuple[MatchIntel, float]:
+def structure(client, research_text: str, match: str, tip: str, model: str = MODEL,
+              alternatives: list[str] | None = None) -> tuple[MatchIntel, float]:
     """Schritt 2: Rechercheergebnis in das feste Schema überführen (validiert)."""
     resp = client.beta.messages.parse(
         model=model, max_tokens=8000, output_format=MatchIntel, output_config={"effort": "low"},
         betas=[FALLBACK_BETA], fallbacks="default",
         messages=[{"role": "user", "content":
-                   f"Spiel: {match}\nTipp: {tip}\n\nRecherche:\n{research_text}\n\n"
+                   f"Spiel: {match}\nTipp: {tip}{_options(alternatives)}\n\nRecherche:\n{research_text}\n\n"
                    "Übertrage die Recherche vollständig und ohne Erfindungen in das Schema. "
-                   "Heimteam zuerst. Bewerte den Tipp (bestätigt/vorsicht/streichen)."}],
+                   "Heimteam zuerst. Bewerte den Tipp (bestätigt/vorsicht/streichen). "
+                   "best_tip: exakt einer der möglichen Tipps (Text unverändert) oder null."}],
     )
     if resp.stop_reason == "refusal" or resp.parsed_output is None:
         raise RuntimeError("Strukturierung fehlgeschlagen")
@@ -146,9 +161,12 @@ def structure(client, research_text: str, match: str, tip: str, model: str = MOD
 
 
 def scout_match(client, match: str, kickoff_local: str, competition: str, tip: str, context: str,
-                model: str = MODEL) -> ScoutResult:
-    text, c1, searches = research(client, match, kickoff_local, competition, tip, context, model)
-    intel, c2 = structure(client, text, match, tip, model)
+                model: str = MODEL, alternatives: list[str] | None = None) -> ScoutResult:
+    text, c1, searches = research(client, match, kickoff_local, competition, tip, context, model,
+                                  alternatives=alternatives)
+    intel, c2 = structure(client, text, match, tip, model, alternatives=alternatives)
+    if intel.best_tip not in (alternatives or []):
+        intel.best_tip = None
     return ScoutResult(intel, c1 + c2, searches, model)
 
 
@@ -173,5 +191,9 @@ def format_intel(match: str, tip: str, intel: MatchIntel) -> str:
         if t.expected_lineup:
             lines.append("Elf: " + ", ".join(t.expected_lineup[:11]))
         lines.append(f"Belastung: {t.fatigue}")
+    if intel.goal_trend:
+        lines.append(f"\n⚽ Tore: {intel.goal_trend}")
+    if intel.best_tip and intel.best_tip != tip:
+        lines.append(f"🔄 Scout empfiehlt stattdessen: <b>{intel.best_tip}</b>")
     lines.append(f"\n{intel.summary}")
     return "\n".join(lines)

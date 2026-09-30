@@ -80,3 +80,14 @@ def test_day_combos_widen_range_when_too_few():
     assert day_combos(fs, sizes=(5,), widen=False) == []
     wide = day_combos(fs, sizes=(5,))
     assert len(wide) == 1 and wide[0]["size"] == 5 and wide[0]["widened"]
+
+
+def test_no_12_or_draw_tips_and_goal_tips_preferred():
+    from fussball.service import best_tip_per_match
+
+    f = MatchForecast(1, "D1", "BL", datetime(2026, 10, 10, 18, 0), "H", "A", 1.5, 1.0, {}, {}, {}, None, None,
+                      0.0, {}, implied={"DC": {"12": 0.84, "1X": 0.80}, "OU1.5": {"O": 0.81, "U": 0.19}})
+    tip = best_tip_per_match([f], 0.75, 0.88)[0]
+    assert tip["market"] == "OU1.5" and tip["selection"] == "O"  # Tore-Tipp vor 1X, "12" nie
+    assert "12" not in {a["selection"] for a in tip["alternatives"]}
+    assert {a["label"] for a in tip["alternatives"]} == {"Über 1.5 Tore", "1X (H)"}

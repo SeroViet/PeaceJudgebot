@@ -76,16 +76,17 @@ def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float
         if cached is not None:
             intel = scout.MatchIntel.model_validate(cached.data)
             out.append({"match_id": leg["match_id"], "assessment": intel.tip_assessment,
-                        "reason": intel.tip_reason, "text": scout.format_intel(leg["match"], leg["label"], intel),
-                        "cached": True})
+                        "reason": intel.tip_reason, "best_tip": intel.best_tip,
+                        "text": scout.format_intel(leg["match"], leg["label"], intel), "cached": True})
             continue
         if spent_today(engine) >= daily_budget():
             log.warning("Agenten-Tagesbudget erreicht (%.2f USD)", daily_budget())
             break
         kickoff = local_time(leg["kickoff"]) if local_time else leg["kickoff"]
         try:
-            res = scout.scout_match(client, leg["match"], str(kickoff), leg.get("comp", ""), leg["label"],
-                                    fatigue_context(engine, leg["match_id"]))
+            res = scout.scout_match(client, leg["match"], str(kickoff), leg.get("comp_name") or leg.get("comp", ""),
+                                    leg["label"], fatigue_context(engine, leg["match_id"]),
+                                    alternatives=[a["label"] for a in leg.get("alternatives", [])] or None)
         except Exception as exc:  # noqa: BLE001 – ein Fehler darf die übrigen Spiele nicht stoppen
             log.exception("Scout fehlgeschlagen für %s", leg["match"])
             out.append({"match_id": leg["match_id"], "assessment": "fehler", "reason": repr(exc)[:200],
@@ -97,6 +98,6 @@ def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float
                               lineup_confirmed=res.intel.home.lineup_confirmed and res.intel.away.lineup_confirmed,
                               data=res.intel.model_dump(), cost_usd=res.cost_usd))
         out.append({"match_id": leg["match_id"], "assessment": res.intel.tip_assessment,
-                    "reason": res.intel.tip_reason, "cost": res.cost_usd,
+                    "reason": res.intel.tip_reason, "best_tip": res.intel.best_tip, "cost": res.cost_usd,
                     "text": scout.format_intel(leg["match"], leg["label"], res.intel), "cached": False})
     return out

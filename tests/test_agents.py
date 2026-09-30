@@ -124,3 +124,25 @@ def test_apply_agents_keeps_caution_leg_without_replacement(engine, fixture_byte
     legs = plan.day_combos[0]["legs"]
     assert risky in {l["match"] for l in legs}
     assert next(l for l in legs if l["match"] == risky)["agent"]["assessment"] == "vorsicht"
+
+
+def test_scout_can_switch_to_better_supported_tip(engine, fixture_bytes, bundesliga, monkeypatch):
+    monkeypatch.setattr(runner, "fatigue_context", lambda e, mid: "ctx")
+    plan = _plan_with_matches(engine, fixture_bytes, bundesliga)
+    leg = plan.day_combos[0]["legs"][0]
+    other = next(a["label"] for a in leg["alternatives"] if a["label"] != leg["label"])
+    client = FakeClient({})
+    orig_parse = client.beta.messages.parse
+
+    def parse(**kw):
+        resp = orig_parse(**kw)
+        if kw["messages"][0]["content"].startswith(f"Spiel: {leg['match']}\n"):
+            resp.parsed_output.best_tip = other
+        return resp
+
+    client.beta.messages.parse = parse
+    service.apply_agents(engine, plan, client=client)
+    new = next(l for l in plan.day_combos[0]["legs"] if l["match_id"] == leg["match_id"])
+    assert new["label"] == other and new["switched_from"]
+    c = plan.day_combos[0]
+    assert c["fair_odds"] == pytest.approx(1 / c["prob"])

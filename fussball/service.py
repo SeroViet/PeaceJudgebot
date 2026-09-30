@@ -420,7 +420,7 @@ def safe_tips(forecasts: list[MatchForecast], min_prob: float = 0.70, max_prob: 
         cands = []
         for market, sels in f.implied.items():
             for sel, p in sels.items():
-                if min_prob <= p <= max_prob:
+                if min_prob <= p <= max_prob and (market, sel) not in EXCLUDED_TIPS:
                     fam = SAFE_FAMILIES.get(market, "tore" if market.startswith("OU") else market[:4])
                     cands.append((p, market, sel, fam))
         cands.sort(key=lambda c: c[0])  # knapp über der Schwelle = höhere faire Quote
@@ -437,24 +437,37 @@ def safe_tips(forecasts: list[MatchForecast], min_prob: float = 0.70, max_prob: 
 
 
 COMBO_MARKETS = ("1X2", "DC", "OU1.5", "OU2.5", "OU3.5", "BTTS")
+# Keine Tipps wie "12 (kein Unentschieden)" oder "X": wenig aussagekräftig
+EXCLUDED_TIPS = {("DC", "12"), ("1X2", "D")}
+# Tore-Tipps (Über/Unter, beide treffen) werden bevorzugt, solange sie nur wenig unsicherer sind
+GOAL_BONUS = 0.04
+
+
+def _is_goal_market(market: str) -> bool:
+    return market.startswith("OU") or market == "BTTS"
 
 
 def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob: float,
-                       markets: tuple[str, ...] = COMBO_MARKETS) -> list[dict]:
-    """Pro Spiel genau ein Tipp: der wahrscheinlichste aus den erlaubten Märkten im Bereich.
-    Triviale Märkte (Über 0.5 Tore, Quote ~1.05) sind bewusst ausgeschlossen."""
+                       markets: tuple[str, ...] = COMBO_MARKETS, n_alternatives: int = 4) -> list[dict]:
+    """Pro Spiel genau ein Tipp aus den erlaubten Märkten im Bereich: der sicherste, wobei Tore-Tipps
+    einen kleinen Vorzug bekommen. Triviale Märkte (Über 0.5 Tore) und "12"/"X" sind ausgeschlossen.
+    `alternatives`: weitere Tipps im Bereich, aus denen der Scout nach seiner Recherche wählen darf."""
     from fussball.models.implied import label
 
     out = []
     for f in forecasts:
-        cands = [(p, m, sel) for m, sels in (f.implied or {}).items() if m in markets for sel, p in sels.items()
-                 if min_prob <= p <= max_prob]
+        cands = [(p + (GOAL_BONUS if _is_goal_market(m) else 0.0), p, m, sel)
+                 for m, sels in (f.implied or {}).items() if m in markets for sel, p in sels.items()
+                 if min_prob <= p <= max_prob and (m, sel) not in EXCLUDED_TIPS]
         if not cands:
             continue
-        p, market, sel = max(cands)
+        cands.sort(reverse=True)
+        tip = lambda p, m, sel: {"market": m, "selection": sel, "label": label(m, sel, f.home, f.away),  # noqa: E731
+                                 "prob": p, "fair_odds": 1 / p}
+        _, p, market, sel = cands[0]
         out.append({"match_id": f.match_id, "match": f"{f.home} – {f.away}", "kickoff": f.kickoff_utc.isoformat(),
-                    "comp": f.comp, "comp_name": f.comp_name, "market": market, "selection": sel,
-                    "label": label(market, sel, f.home, f.away), "prob": p, "fair_odds": 1 / p})
+                    "comp": f.comp, "comp_name": f.comp_name, **tip(p, market, sel),
+                    "alternatives": [tip(p, m, s) for _, p, m, s in cands[:n_alternatives]]})
     return out
 
 
@@ -568,8 +581,16 @@ def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: floa
         plan.day_combos = combos
     for c in plan.day_combos:
         for leg in c["legs"]:
-            if leg["match_id"] in results:
-                leg["agent"] = {k: results[leg["match_id"]][k] for k in ("assessment", "reason")}
+            r = results.get(leg["match_id"])
+            if r is None:
+                continue
+            # Der Scout darf nach seiner Recherche einen anderen Tipp aus dem sicheren Bereich wählen
+            alt = next((a for a in leg.get("alternatives", []) if a["label"] == r.get("best_tip")), None)
+            if alt and alt["label"] != leg["label"]:
+                leg.update(alt, switched_from=leg["label"])
+            leg["agent"] = {k: r[k] for k in ("assessment", "reason")}
+        c["prob"] = float(np.prod([l["prob"] for l in c["legs"]]))
+        c["fair_odds"], c["leg_min"] = 1 / c["prob"], min(l["prob"] for l in c["legs"])
     return [{**r, "removed": r["match_id"] in excluded} for r in results.values()]
 
 

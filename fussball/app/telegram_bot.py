@@ -154,6 +154,8 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
                               f" <i>({l.get('comp_name') or l.get('comp', '')})</i>\n"
                               f"     ➡️ <b>{l['label']}</b> ({l['prob']:.0%})"
                               f"{icon.get((l.get('agent') or {}).get('assessment'), '')}"
+                              + (f"\n     <i>🔄 vom Scout gewählt statt „{l['switched_from']}“</i>"
+                                 if l.get("switched_from") else "")
                               + f"\n     {_leg_odds(l)}"
                               + (f"\n     <i>⚠️ {l['agent']['reason']}</i>"
                                  if (l.get("agent") or {}).get("assessment") == "vorsicht" else "")

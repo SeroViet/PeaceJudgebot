@@ -102,6 +102,12 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3) -> dict:
         books = plan.config.get("bookmakers") or None
         service.attach_book_odds(engine, plan.day_combos, books)
         service.attach_book_odds(engine, plan.risky_combos, books)
+        from fussball.agents import slip
+
+        table = slip.ratios(engine)
+        for c in plan.day_combos + plan.risky_combos:
+            for leg in c["legs"]:
+                leg["sporttip_est"] = slip.estimate(table, leg["market"], 1 / leg["prob"])
         data = serialize_plan(plan)
         service.record_served(engine, plan.day_combos)
         info["combo_results"] = service.evaluate_served(engine)

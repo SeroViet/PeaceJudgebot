@@ -11,7 +11,7 @@ import os
 
 from telegram import BotCommand, Update
 from telegram.constants import ParseMode
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, filters
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from fussball import service
 from fussball.app import state
@@ -96,6 +96,9 @@ RISKY_BT = "Risiko: Einzeltipps dieser Art im Backtest ca. 65 % richtig. Nur kle
 def _leg_odds(l: dict) -> str:
     """Quoten-Zeile eines Legs: Sporttip-Mindestquote (= faire Quote) und Live-Quote der Buchmacher."""
     parts = [f"Sporttip mind. <b>{1 / l['prob']:.2f}</b>"]
+    if l.get("sporttip_est"):
+        ok = "✅" if l["sporttip_est"] >= 1 / l["prob"] else "❌"
+        parts.append(f"Sporttip ca. {l['sporttip_est']:.2f} {ok}")
     if l.get("book_odds"):
         parts.append(f"live {l['book_odds']:.2f} ({l['book']})")
     if l.get("ps_odds"):
@@ -142,6 +145,35 @@ def check_sporttip(plan: dict, combo_id: str, quotes: list[float]) -> str:
     return "\n".join(lines)
 
 
+def format_slip(rows: list[dict], total_odds: float | None, learned: int) -> str:
+    """Antwort auf einen Sporttip-Screenshot: jede Wette gegen die faire Quote."""
+    lines = ["🇨🇭 <b>Sporttip-Schein geprüft</b>"]
+    fair_total, st_total, complete = 1.0, 1.0, True
+    for r in rows:
+        leg = r["leg"]
+        if r["fair"] is None:
+            complete = False
+            lines.append(f"❔ {r['match']} · {leg.market_text} @ {leg.odds:.2f} – keine faire Quote gefunden")
+            continue
+        fair_total *= r["fair"]
+        st_total *= leg.odds
+        icon = "✅" if leg.odds >= r["fair"] else "⚠️" if leg.odds >= r["fair"] * 0.95 else "❌"
+        lines.append(f"{icon} {r['match']} · {leg.market_text}: Sporttip <b>{leg.odds:.2f}</b> / fair "
+                     f"{r['fair']:.2f} ({leg.odds / r['fair'] - 1:+.0%}) · Chance {r['prob']:.0%}")
+    priced = [r for r in rows if r["fair"]]
+    if len(priced) > 1 and complete:
+        total = total_odds or st_total
+        value = total / fair_total - 1
+        verdict = ("✅ <b>Gute Quote</b> – spielbar." if value >= 0 else
+                   "⚠️ Knapp unter fair – wenn, dann nur kleiner Einsatz." if value >= -0.05 else
+                   "❌ <b>Zu tief</b> – Sporttip zahlt zu wenig; Spiele mit ❌ weglassen.")
+        lines.append(f"\nKombi: Sporttip <b>{total:.2f}</b> · fair {fair_total:.2f} → <b>{value:+.1%}</b>\n{verdict}")
+        lines.append(f"Trefferchance gesamt {1 / fair_total:.0%}")
+    if learned:
+        lines.append(f"\n📚 {learned} Quote(n) gelernt – damit schätze ich Sporttip-Quoten in den Tipps.")
+    return "\n".join(lines)
+
+
 def format_day_combos(plan: dict, max_days: int = 2) -> str:
     combos = plan.get("day_combos", [])
     if not combos:
@@ -164,6 +196,12 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
                               for i, l in enumerate(c["legs"], 1))
             live = (f"Live-Gesamtquote (beste Buchmacher): <b>{c['book_odds']:.2f}</b>"
                     f"{_odds_time(c['legs'])}\n" if c.get("book_odds") else "")
+            if all(l.get("sporttip_est") for l in c["legs"]):
+                est = 1.0
+                for l in c["legs"]:
+                    est *= l["sporttip_est"]
+                live += (f"Sporttip geschätzt (aus deinen Screenshots): <b>{est:.2f}</b> "
+                         f"{'✅' if est >= c['fair_odds'] else '❌ unter fair'}\n")
             wide = ("\n<i>Heute gibt es nicht genug Spiele im Bereich 75–88 %, darum etwas "
                     "breiter gewählt.</i>" if c.get("widened") else "")
             head = (f"🎲 <b>{c['id']} · Risiko-Kombi {d}</b> ({c['size']} Spiele, höhere Quote)" if c.get("risky")
@@ -321,6 +359,7 @@ def build(engine) -> Application | None:
                             "/tageskombi – 5er/6er-Kombi, alle Spiele am selben Tag\n"
                             "/risiko – Risiko-Kombi mit höherer Quote\n"
                             "/sporttip T1 Quoten – Sporttip-Quoten prüfen\n"
+                            "📸 Screenshot vom Sporttip-Schein schicken – ich prüfe die Quoten\n"
                             "/sicher – Tipps mit hoher Trefferquote (Über/Unter, 1X …)\n"
                             "/bilanz – Bilanz\n/gesetzt Nr Einsatz Quote – Wette erfassen (z. B. /gesetzt S3 10 1.45)\n"
                             "/update – neu berechnen")
@@ -408,6 +447,41 @@ def build(engine) -> Application | None:
             return
         await reply(update, check_sporttip(state.load_plan(), combo_id, quotes))
 
+    async def on_photo(update: Update, _ctx):
+        from fussball.agents import scout, slip
+
+        client = scout.make_client()
+        if client is None:
+            await reply(update, "Zum Lesen von Screenshots fehlt ANTHROPIC_API_KEY beim Server.")
+            return
+        msg = update.effective_message
+        if msg.photo:
+            tg_file, media = await msg.photo[-1].get_file(), "image/jpeg"
+        else:
+            tg_file, media = await msg.document.get_file(), msg.document.mime_type or "image/jpeg"
+        image = bytes(await tg_file.download_as_bytearray())
+        await reply(update, "🔍 Lese den Sporttip-Schein … (ca. 20 Sekunden)")
+
+        def work():
+            forecasts = service.market_forecasts(engine, hours=96)
+            listing = [f"{f.match_id}: {f.home} – {f.away} ({state.local(f.kickoff_utc):%d.%m. %H:%M})"
+                       for f in forecasts]
+            data, _cost = slip.read_slip(client, image, media, listing)
+            rows = slip.evaluate(data, forecasts)
+            return data, rows, slip.remember(engine, rows)
+
+        try:
+            data, rows, learned = await asyncio.get_running_loop().run_in_executor(None, work)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Screenshot fehlgeschlagen")
+            await reply(update, f"⚠️ Konnte das Bild nicht lesen: {exc}"[:300])
+            return
+        if not data.is_betting_slip or not data.legs:
+            await reply(update, "Auf dem Bild habe ich keine Wetten mit Quoten gefunden. Bitte den Sporttip-Schein "
+                                "oder die Spielliste mit Quoten fotografieren.")
+            return
+        await reply(update, format_slip(rows, data.total_odds, learned))
+
     async def cmd_update(update: Update, _ctx):
         await reply(update, "⟳ Aktualisiere Daten und Prognosen …")
         info = await asyncio.get_running_loop().run_in_executor(None, lambda: state.refresh(engine))
@@ -420,6 +494,7 @@ def build(engine) -> Application | None:
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update),
                      ("sporttip", cmd_sporttip), ("risiko", cmd_risky)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
+    app.add_handler(MessageHandler((filters.PHOTO | filters.Document.IMAGE) & only_owner, on_photo))
     return app
 
 

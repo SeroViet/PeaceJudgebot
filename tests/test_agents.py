@@ -57,7 +57,8 @@ def _plan_with_matches(engine, fixture_bytes, league, n=7):
         fd.import_season(s, league, "2425", fixture_bytes("D1_2425_sample.csv"))
         fd.import_season(s, league, "2627", fixture_bytes("D1_2627_sample.csv"))
         ids = [m.id for m in s.scalars(select(Match))]  # 8 echte Spiele
-    kickoff = utcnow() + timedelta(hours=20)
+    # morgen 10:00 UTC: alle Spiele am selben Schweizer Kalendertag und innerhalb von 36 h
+    kickoff = (utcnow() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
     forecasts = []
     for i in range(n):
         lam, mu = fit_rates({"H": 0.62 - i * 0.01, "D": 0.22, "A": 0.16 + i * 0.01}, 2.5, 0.57)

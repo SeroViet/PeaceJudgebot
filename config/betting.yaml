@@ -34,6 +34,12 @@ day_combo:
   min_prob: 0.75
   max_prob: 0.88
 
+# Risiko-Kombi: höhere Quoten (Über/Unter 2.5, beide treffen, Sieg), andere Spiele als die Tageskombi
+risky_combo:
+  size: 3
+  min_prob: 0.60
+  max_prob: 0.72
+
 combos:
   min_legs: 4
   max_legs: 6

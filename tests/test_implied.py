@@ -91,3 +91,28 @@ def test_no_12_or_draw_tips_and_goal_tips_preferred():
     assert tip["market"] == "OU1.5" and tip["selection"] == "O"  # Tore-Tipp vor 1X, "12" nie
     assert "12" not in {a["selection"] for a in tip["alternatives"]}
     assert {a["label"] for a in tip["alternatives"]} == {"Über 1.5 Tore", "1X (H)"}
+
+
+def test_risky_combo_uses_other_matches_and_higher_odds_markets():
+    from fussball.service import risky_combos
+
+    fs = [MatchForecast(i, "D1", "BL", datetime(2026, 10, 10, 12 + i, 0), f"H{i}", f"A{i}", 1.6, 1.3, {}, {}, {},
+                        None, None, 0.0, {}, implied={"OU2.5": {"O": 0.66, "U": 0.34}, "BTTS": {"Y": 0.40, "N": 0.64},
+                                                      "OU1.5": {"O": 0.85, "U": 0.15}})
+          for i in range(5)]
+    safe = [{"day": "2026-10-10", "legs": [{"match_id": 0}]}]
+    combos = risky_combos(fs, safe, size=3)
+    assert len(combos) == 1 and combos[0]["risky"]
+    legs = combos[0]["legs"]
+    assert 0 not in {l["match_id"] for l in legs}  # nicht in der sicheren Kombi
+    assert all(l["label"] == "Über 2.5 Tore" for l in legs)  # kein "beide treffen: Nein", kein Über 1.5
+    assert combos[0]["fair_odds"] > 3
+
+
+def test_risky_combo_falls_back_to_safe_combo_matches():
+    from fussball.service import risky_combos
+
+    fs = [MatchForecast(i, "D1", "BL", datetime(2026, 10, 10, 12 + i, 0), f"H{i}", f"A{i}", 1.6, 1.3, {}, {}, {},
+                        None, None, 0.0, {}, implied={"OU2.5": {"O": 0.66, "U": 0.34}}) for i in range(3)]
+    safe = [{"day": "2026-10-10", "legs": [{"match_id": 0}, {"match_id": 1}]}]
+    assert len(risky_combos(fs, safe, size=3)[0]["legs"]) == 3

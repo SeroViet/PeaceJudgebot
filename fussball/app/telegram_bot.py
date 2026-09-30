@@ -74,8 +74,8 @@ def _find_legs(plan: dict, tip_id: str) -> list[dict] | None:
     if tid.startswith("K"):
         c = next((c for c in plan["combos"] if c["id"] == tid), None)
         return c["legs"] if c else None
-    if tid.startswith("T"):
-        c = next((c for c in plan.get("day_combos", []) if c["id"] == tid), None)
+    if tid.startswith(("T", "R")):
+        c = next((c for c in plan.get("day_combos", []) + plan.get("risky_combos", []) if c["id"] == tid), None)
         if not c:
             return None
         return [{**l, "market": split_market(l["market"])[0], "line": split_market(l["market"])[1]} for l in c["legs"]]
@@ -90,6 +90,7 @@ def _find_legs(plan: dict, tip_id: str) -> list[dict] | None:
 
 
 DAY_BT = {"5": "46 % aufgegangen, Ø 4,3 von 5 richtig", "6": "41 % aufgegangen, Ø 5,2 von 6 richtig"}
+RISKY_BT = "Risiko: Einzeltipps dieser Art im Backtest ca. 65 % richtig. Nur kleiner Einsatz."
 
 
 def _leg_odds(l: dict) -> str:
@@ -110,7 +111,8 @@ def _odds_time(legs: list[dict]) -> str:
 def check_sporttip(plan: dict, combo_id: str, quotes: list[float]) -> str:
     """Sporttip-Quoten mit den fairen Quoten der Tageskombi vergleichen.
     Eine Zahl = Gesamtquote der Kombi; sonst eine Quote pro Spiel (in der Reihenfolge der Nachricht)."""
-    c = next((c for c in plan.get("day_combos", []) if c["id"].upper() == combo_id.upper()), None)
+    c = next((c for c in plan.get("day_combos", []) + plan.get("risky_combos", [])
+              if c["id"].upper() == combo_id.upper()), None)
     if c is None:
         return f"Kombi {combo_id} nicht gefunden. Die aktuelle Nummer steht in /tageskombi (z. B. T1)."
     legs = c["legs"]
@@ -164,12 +166,15 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
                     f"{_odds_time(c['legs'])}\n" if c.get("book_odds") else "")
             wide = ("\n<i>Heute gibt es nicht genug Spiele im Bereich 75–88 %, darum etwas "
                     "breiter gewählt.</i>" if c.get("widened") else "")
-            out.append(f"🎯 <b>{c['id']} · {c['size']}er-Tageskombi {d}</b>\n{legs}\n"
+            head = (f"🎲 <b>{c['id']} · Risiko-Kombi {d}</b> ({c['size']} Spiele, höhere Quote)" if c.get("risky")
+                    else f"🎯 <b>{c['id']} · {c['size']}er-Tageskombi {d}</b>")
+            bt = RISKY_BT if c.get("risky") else f"Backtest {c['size']}er: {DAY_BT.get(str(c['size']), '')}"
+            out.append(f"{head}\n{legs}\n"
                        f"Trefferchance gesamt <b>{c['prob']:.0%}</b> · faire Gesamtquote <b>{c['fair_odds']:.2f}</b>\n"
                        f"{live}"
                        f"Nur spielen, wenn Sporttip ≥ <b>{c['fair_odds']:.2f}</b> zahlt. "
                        f"Prüfen: /sporttip {c['id']} Quote1 Quote2 …\n"
-                       f"<i>Backtest {c['size']}er: {DAY_BT.get(str(c['size']), '')}</i>{wide}")
+                       f"<i>{bt}</i>{wide}")
     return "\n\n".join(out)
 
 
@@ -178,6 +183,16 @@ def format_today(plan: dict) -> str:
     from datetime import datetime
 
     today = datetime.now(state.TZ).date().isoformat()
+    text = _format_today_safe(plan, today)
+    risky = [c for c in plan.get("risky_combos", []) if c["day"] == today]
+    if risky:
+        text += "\n\n" + format_day_combos({**plan, "day_combos": risky}, max_days=1)
+    return text
+
+
+def _format_today_safe(plan: dict, today: str) -> str:
+    from datetime import datetime
+
     combos = plan.get("day_combos", [])
     if any(c["day"] == today for c in combos):
         return format_day_combos({**plan, "day_combos": [c for c in combos if c["day"] == today]}, max_days=1)
@@ -258,6 +273,7 @@ def format_stats(engine) -> str:
 
 COMMANDS = [
     ("tageskombi", "5er/6er-Kombi, alle Spiele am selben Tag"),
+    ("risiko", "Risiko-Kombi: 3 Spiele mit höherer Quote"),
     ("sporttip", "Sporttip-Quoten prüfen: /sporttip T1 1.30 1.25 …"),
     ("sicher", "Tipps mit hoher Trefferquote"),
     ("heute", "Value-Tipps und Sicher-Tipps"),
@@ -303,6 +319,7 @@ def build(engine) -> Application | None:
             return
         await reply(update, "👋 PeaceJudge ist bereit.\n/heute – Tipps\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/tageskombi – 5er/6er-Kombi, alle Spiele am selben Tag\n"
+                            "/risiko – Risiko-Kombi mit höherer Quote\n"
                             "/sporttip T1 Quoten – Sporttip-Quoten prüfen\n"
                             "/sicher – Tipps mit hoher Trefferquote (Über/Unter, 1X …)\n"
                             "/bilanz – Bilanz\n/gesetzt Nr Einsatz Quote – Wette erfassen (z. B. /gesetzt S3 10 1.45)\n"
@@ -375,6 +392,12 @@ def build(engine) -> Application | None:
         service.record_bet(engine, legs, stake, odds)
         await reply(update, f"✅ Erfasst: {tip_id}, Einsatz {stake:.2f} @ {odds:.2f}")
 
+    async def cmd_risky(update: Update, _ctx):
+        plan = state.load_plan()
+        combos = plan.get("risky_combos", [])
+        await reply(update, format_day_combos({**plan, "day_combos": combos}, max_days=2) if combos
+                    else "Keine Risiko-Kombi möglich (zu wenige Spiele mit 60–72 % an einem Tag).")
+
     async def cmd_sporttip(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         try:
             combo_id, quotes = ctx.args[0], [float(a.replace(",", ".")) for a in ctx.args[1:]]
@@ -395,7 +418,7 @@ def build(engine) -> Application | None:
     app.add_handler(CommandHandler("start", cmd_start))
     for name, fn in (("heute", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update),
-                     ("sporttip", cmd_sporttip)):
+                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     return app
 

@@ -55,6 +55,7 @@ def serialize_plan(plan: service.DailyPlan) -> dict:
         "generated_at": utcnow().isoformat(),
         "safe": safe,
         "day_combos": [{**c, "id": f"T{i}"} for i, c in enumerate(plan.day_combos, start=1)],
+        "risky_combos": [{**c, "id": f"R{i}"} for i, c in enumerate(plan.risky_combos, start=1)],
         "forecasts": [f.to_dict() for f in plan.forecasts],
         "singles": singles,
         "combos": combos,
@@ -91,7 +92,16 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3) -> dict:
         except Exception:  # noqa: BLE001 – ohne Agenten weiterarbeiten
             log.exception("Agenten fehlgeschlagen")
             info["agent"] = []
-        service.attach_book_odds(engine, plan.day_combos, plan.config.get("bookmakers") or None)
+        rc = plan.config.get("risky_combo", {})
+        plan.risky_combos = service.risky_combos(plan.all_forecasts or plan.forecasts, plan.day_combos,
+                                                 rc.get("size", 3), rc.get("min_prob", 0.60), rc.get("max_prob", 0.72))
+        try:
+            info["agent"] += service.apply_agents_risky(engine, plan)
+        except Exception:  # noqa: BLE001
+            log.exception("Agenten (Risiko-Kombi) fehlgeschlagen")
+        books = plan.config.get("bookmakers") or None
+        service.attach_book_odds(engine, plan.day_combos, books)
+        service.attach_book_odds(engine, plan.risky_combos, books)
         data = serialize_plan(plan)
         service.record_served(engine, plan.day_combos)
         info["combo_results"] = service.evaluate_served(engine)

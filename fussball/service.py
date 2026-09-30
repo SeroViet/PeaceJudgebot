@@ -448,7 +448,8 @@ def _is_goal_market(market: str) -> bool:
 
 
 def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob: float,
-                       markets: tuple[str, ...] = COMBO_MARKETS, n_alternatives: int = 4) -> list[dict]:
+                       markets: tuple[str, ...] = COMBO_MARKETS, n_alternatives: int = 4,
+                       exclude: set = EXCLUDED_TIPS) -> list[dict]:
     """Pro Spiel genau ein Tipp aus den erlaubten Märkten im Bereich: der sicherste, wobei Tore-Tipps
     einen kleinen Vorzug bekommen. Triviale Märkte (Über 0.5 Tore) und "12"/"X" sind ausgeschlossen.
     `alternatives`: weitere Tipps im Bereich, aus denen der Scout nach seiner Recherche wählen darf."""
@@ -458,7 +459,7 @@ def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob
     for f in forecasts:
         cands = [(p + (GOAL_BONUS if _is_goal_market(m) else 0.0), p, m, sel)
                  for m, sels in (f.implied or {}).items() if m in markets for sel, p in sels.items()
-                 if min_prob <= p <= max_prob and (m, sel) not in EXCLUDED_TIPS]
+                 if min_prob <= p <= max_prob and (m, sel) not in exclude]
         if not cands:
             continue
         cands.sort(reverse=True)
@@ -536,6 +537,64 @@ def attach_book_odds(engine: Engine, combos: list[dict], books: list[str] | None
                     leg.update(book_odds=price, book=BOOK_NAMES.get(book, book), odds_at=at.isoformat())
             if all(l.get("book_odds") for l in c["legs"]):
                 c["book_odds"] = float(np.prod([l["book_odds"] for l in c["legs"]]))
+
+
+# Risiko-Kombi: Tipps mit höherer Quote (60–72 %). Nur Märkte, die im Backtest in diesem Bereich
+# gut kalibriert sind: 1/2, Über/Unter 2.5, beide treffen "Ja" ("Nein" traf 5 Punkte zu selten).
+RISKY_MARKETS = ("1X2", "OU2.5", "BTTS")
+RISKY_EXCLUDED = EXCLUDED_TIPS | {("BTTS", "N")}
+
+
+def risky_combos(forecasts: list[MatchForecast], safe_combos: list[dict], size: int = 3, min_prob: float = 0.60,
+                 max_prob: float = 0.72, tz: str = "Europe/Zurich", skip: set[int] | None = None) -> list[dict]:
+    """Pro Tag eine Risiko-Kombi aus `size` Spielen, möglichst andere als in der sicheren Tageskombi."""
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo(tz)
+    used: dict[str, set[int]] = {}
+    for c in safe_combos:
+        used.setdefault(c["day"], set()).update(l["match_id"] for l in c["legs"])
+    by_day: dict[str, list[dict]] = {}
+    for t in best_tip_per_match([f for f in forecasts if f.match_id not in (skip or set())], min_prob, max_prob,
+                                RISKY_MARKETS, exclude=RISKY_EXCLUDED):
+        day = datetime.fromisoformat(t["kickoff"]).replace(tzinfo=ZoneInfo("UTC")).astimezone(zone).date().isoformat()
+        by_day.setdefault(day, []).append(t)
+    out = []
+    for day in sorted(by_day):
+        # Spiele, die nicht in der sicheren Kombi stehen, zuerst; reicht das nicht, auch diese
+        legs = sorted(by_day[day], key=lambda t: (t["match_id"] in used.get(day, set()),
+                                                  -(t["prob"] + (GOAL_BONUS if _is_goal_market(t["market"]) else 0))))
+        if len(legs) < size:
+            continue
+        chosen = sorted(legs[:size], key=lambda t: t["kickoff"])
+        prob = float(np.prod([t["prob"] for t in chosen]))
+        out.append({"day": day, "size": size, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
+                    "leg_min": min(t["prob"] for t in chosen), "risky": True})
+    return out
+
+
+def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0) -> list[dict]:
+    """Scout prüft die Risiko-Kombi des nächsten Tages; gestrichene Spiele werden ersetzt (eine Runde)."""
+    from fussball.agents import runner
+    from fussball.app.state import local
+
+    now = utcnow()
+    soon = [c for c in plan.risky_combos
+            if now < datetime.fromisoformat(c["legs"][0]["kickoff"]) <= now + timedelta(hours=horizon_h)]
+    if not soon:
+        return []
+    res = {r["match_id"]: r for r in runner.analyze_legs(engine, soon[0]["legs"], client=client, local_time=local)}
+    struck = {mid for mid, r in res.items() if r["assessment"] == "streichen"}
+    if struck:
+        rc = plan.config.get("risky_combo", {})
+        plan.risky_combos = risky_combos(plan.all_forecasts or plan.forecasts, plan.day_combos,
+                                         rc.get("size", 3), rc.get("min_prob", 0.60), rc.get("max_prob", 0.72),
+                                         skip=struck)
+    for c in plan.risky_combos:
+        for leg in c["legs"]:
+            if leg["match_id"] in res:
+                leg["agent"] = {k: res[leg["match_id"]][k] for k in ("assessment", "reason")}
+    return list(res.values())
 
 
 def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,
@@ -701,6 +760,7 @@ class DailyPlan:
     safe: list[dict] = field(default_factory=list)
     day_combos: list[dict] = field(default_factory=list)
     all_forecasts: list = field(default_factory=list)
+    risky_combos: list[dict] = field(default_factory=list)
 
 
 def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | None = None) -> DailyPlan:

@@ -78,19 +78,20 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3) -> dict:
     _status["running"] = True
     try:
         info = {}
+        old = load_plan()
         if fetch:
-            info["update"] = service.update_data(engine)
+            info["update"] = service.update_data(engine, live=service.live_sports(engine, old))
             _status["last_update"] = utcnow().isoformat()
         details: list = []
         info["settled"] = service.settle_bets(engine, details)
         info["settled_details"] = details
-        old = load_plan()
         plan = service.daily_plan(engine, days=days)
         try:
             info["agent"] = service.apply_agents(engine, plan)
         except Exception:  # noqa: BLE001 – ohne Agenten weiterarbeiten
             log.exception("Agenten fehlgeschlagen")
             info["agent"] = []
+        service.attach_book_odds(engine, plan.day_combos, plan.config.get("bookmakers") or None)
         data = serialize_plan(plan)
         service.record_served(engine, plan.day_combos)
         info["combo_results"] = service.evaluate_served(engine)

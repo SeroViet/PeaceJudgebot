@@ -92,6 +92,54 @@ def _find_legs(plan: dict, tip_id: str) -> list[dict] | None:
 DAY_BT = {"5": "46 % aufgegangen, Ø 4,3 von 5 richtig", "6": "41 % aufgegangen, Ø 5,2 von 6 richtig"}
 
 
+def _leg_odds(l: dict) -> str:
+    """Quoten-Zeile eines Legs: Sporttip-Mindestquote (= faire Quote) und Live-Quote der Buchmacher."""
+    parts = [f"Sporttip mind. <b>{1 / l['prob']:.2f}</b>"]
+    if l.get("book_odds"):
+        parts.append(f"live {l['book_odds']:.2f} ({l['book']})")
+    if l.get("ps_odds"):
+        parts.append(f"Pinnacle {l['ps_odds']:.2f}")
+    return "💶 " + " · ".join(parts)
+
+
+def _odds_time(legs: list[dict]) -> str:
+    times = [l["odds_at"] for l in legs if l.get("odds_at")]
+    return f" <i>(Stand {state.local(min(times)).strftime('%d.%m. %H:%M')})</i>" if times else ""
+
+
+def check_sporttip(plan: dict, combo_id: str, quotes: list[float]) -> str:
+    """Sporttip-Quoten mit den fairen Quoten der Tageskombi vergleichen.
+    Eine Zahl = Gesamtquote der Kombi; sonst eine Quote pro Spiel (in der Reihenfolge der Nachricht)."""
+    c = next((c for c in plan.get("day_combos", []) if c["id"].upper() == combo_id.upper()), None)
+    if c is None:
+        return f"Kombi {combo_id} nicht gefunden. Die aktuelle Nummer steht in /tageskombi (z. B. T1)."
+    legs = c["legs"]
+    lines = [f"🇨🇭 <b>Sporttip-Check {c['id']}</b> ({c['size']}er)"]
+    if len(quotes) == 1:
+        total = quotes[0]
+    elif len(quotes) == len(legs):
+        total = 1.0
+        for i, (l, q) in enumerate(zip(legs, quotes), 1):
+            fair = 1 / l["prob"]
+            total *= q
+            ok = "✅" if q >= fair else "❌"
+            lines.append(f"{ok} {i}. {l['match']} · {l['label']}: Sporttip {q:.2f} / fair {fair:.2f} "
+                         f"({q / fair - 1:+.0%})")
+    else:
+        return (f"Bitte entweder 1 Zahl (Gesamtquote) oder {len(legs)} Quoten (eine pro Spiel) eingeben.\n"
+                f"Beispiel: /sporttip {c['id']} " + " ".join(["1.30"] * len(legs)))
+    value = total / c["fair_odds"] - 1
+    lines.append(f"\nSporttip gesamt <b>{total:.2f}</b> · fair {c['fair_odds']:.2f} → <b>{value:+.1%}</b>")
+    if value >= 0:
+        lines.append("✅ <b>Gute Quote</b>: Sporttip zahlt mindestens die faire Quote. Spielbar.")
+    elif value >= -0.05:
+        lines.append("⚠️ Knapp unter fair: auf lange Sicht leicht im Minus. Wenn, dann nur kleiner Einsatz.")
+    else:
+        lines.append("❌ <b>Zu tiefe Quote</b>: Sporttip zahlt deutlich zu wenig. Auf lange Sicht Verlust – besser "
+                     "einzelne Spiele mit ❌ weglassen oder nicht spielen.")
+    return "\n".join(lines)
+
+
 def format_day_combos(plan: dict, max_days: int = 2) -> str:
     combos = plan.get("day_combos", [])
     if not combos:
@@ -106,14 +154,19 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
                               f" <i>({l.get('comp_name') or l.get('comp', '')})</i>\n"
                               f"     ➡️ <b>{l['label']}</b> ({l['prob']:.0%})"
                               f"{icon.get((l.get('agent') or {}).get('assessment'), '')}"
+                              + f"\n     {_leg_odds(l)}"
                               + (f"\n     <i>⚠️ {l['agent']['reason']}</i>"
                                  if (l.get("agent") or {}).get("assessment") == "vorsicht" else "")
                               for i, l in enumerate(c["legs"], 1))
+            live = (f"Live-Gesamtquote (beste Buchmacher): <b>{c['book_odds']:.2f}</b>"
+                    f"{_odds_time(c['legs'])}\n" if c.get("book_odds") else "")
             wide = ("\n<i>Heute gibt es nicht genug Spiele im Bereich 75–88 %, darum etwas "
                     "breiter gewählt.</i>" if c.get("widened") else "")
             out.append(f"🎯 <b>{c['id']} · {c['size']}er-Tageskombi {d}</b>\n{legs}\n"
                        f"Trefferchance gesamt <b>{c['prob']:.0%}</b> · faire Gesamtquote <b>{c['fair_odds']:.2f}</b>\n"
-                       f"Nur spielen, wenn Sporttip ≥ {c['fair_odds']:.2f} zahlt.\n"
+                       f"{live}"
+                       f"Nur spielen, wenn Sporttip ≥ <b>{c['fair_odds']:.2f}</b> zahlt. "
+                       f"Prüfen: /sporttip {c['id']} Quote1 Quote2 …\n"
                        f"<i>Backtest {c['size']}er: {DAY_BT.get(str(c['size']), '')}</i>{wide}")
     return "\n\n".join(out)
 
@@ -192,6 +245,7 @@ def format_stats(engine) -> str:
 
 COMMANDS = [
     ("tageskombi", "5er/6er-Kombi, alle Spiele am selben Tag"),
+    ("sporttip", "Sporttip-Quoten prüfen: /sporttip T1 1.30 1.25 …"),
     ("sicher", "Tipps mit hoher Trefferquote"),
     ("heute", "Value-Tipps und Sicher-Tipps"),
     ("analyse", "Agenten-Analyse: /analyse Team"),
@@ -236,6 +290,7 @@ def build(engine) -> Application | None:
             return
         await reply(update, "👋 PeaceJudge ist bereit.\n/heute – Tipps\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/tageskombi – 5er/6er-Kombi, alle Spiele am selben Tag\n"
+                            "/sporttip T1 Quoten – Sporttip-Quoten prüfen\n"
                             "/sicher – Tipps mit hoher Trefferquote (Über/Unter, 1X …)\n"
                             "/bilanz – Bilanz\n/gesetzt Nr Einsatz Quote – Wette erfassen (z. B. /gesetzt S3 10 1.45)\n"
                             "/update – neu berechnen")
@@ -307,6 +362,16 @@ def build(engine) -> Application | None:
         service.record_bet(engine, legs, stake, odds)
         await reply(update, f"✅ Erfasst: {tip_id}, Einsatz {stake:.2f} @ {odds:.2f}")
 
+    async def cmd_sporttip(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        try:
+            combo_id, quotes = ctx.args[0], [float(a.replace(",", ".")) for a in ctx.args[1:]]
+            assert quotes and all(q > 1.0 for q in quotes)
+        except (IndexError, ValueError, AssertionError):
+            await reply(update, "Format: /sporttip T1 1.30 1.25 1.40 1.22 1.35 (eine Quote pro Spiel)\n"
+                                "oder /sporttip T1 3.10 (Gesamtquote vom Sporttip-Schein)")
+            return
+        await reply(update, check_sporttip(state.load_plan(), combo_id, quotes))
+
     async def cmd_update(update: Update, _ctx):
         await reply(update, "⟳ Aktualisiere Daten und Prognosen …")
         info = await asyncio.get_running_loop().run_in_executor(None, lambda: state.refresh(engine))
@@ -316,7 +381,8 @@ def build(engine) -> Application | None:
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CommandHandler("start", cmd_start))
     for name, fn in (("heute", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
-                     ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update)):
+                     ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update),
+                     ("sporttip", cmd_sporttip)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     return app
 

@@ -144,7 +144,7 @@ def test_lite_mode_skips_history(monkeypatch):
     from fussball.app import state
 
     monkeypatch.delenv("FULL_MODEL", raising=False)
-    monkeypatch.setattr(service, "world_scan", lambda engine: {"fetched": {}})
+    monkeypatch.setattr(service, "world_scan", lambda engine, live=None: {"fetched": {}})
     monkeypatch.setattr(service.football_data, "run_import",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("Historie im Sparmodus")))
     assert service.lite_mode()

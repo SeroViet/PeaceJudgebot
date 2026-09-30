@@ -37,3 +37,30 @@ def test_combo_result_and_today_formatting():
     text = telegram_bot.format_combo_result(c)
     assert "verloren" in text and "4 von 5 richtig" in text and "❌ C – D 0:0" in text
     assert "keine 5 Spiele" in telegram_bot.format_today({"day_combos": []})
+
+
+def _combo():
+    legs = [{"match_id": i, "match": f"H{i} – A{i}", "kickoff": "2026-10-10T18:00:00", "comp": "D1",
+             "label": "Über 1.5 Tore", "prob": 0.8, "market": "OU1.5", "selection": "O"} for i in range(5)]
+    return {"day_combos": [{"id": "T1", "day": "2026-10-10", "size": 5, "legs": legs, "prob": 0.8 ** 5,
+                            "fair_odds": 1 / 0.8 ** 5}]}
+
+
+def test_sporttip_check_per_leg_and_total():
+    plan = _combo()
+    good = telegram_bot.check_sporttip(plan, "t1", [1.30] * 5)  # 1.30 > fair 1.25
+    assert "Gute Quote" in good and good.count("✅") >= 5
+    bad = telegram_bot.check_sporttip(plan, "T1", [2.40])  # fair gesamt 3.05
+    assert "Zu tiefe Quote" in bad
+    assert "5 Quoten" in telegram_bot.check_sporttip(plan, "T1", [1.3, 1.3])
+    assert "nicht gefunden" in telegram_bot.check_sporttip(plan, "T9", [2.0])
+
+
+def test_day_combo_shows_min_and_live_odds():
+    plan = _combo()
+    for l in plan["day_combos"][0]["legs"]:
+        l.update(book_odds=1.33, book="Bet365", ps_odds=1.27, odds_at="2026-10-10T08:00:00")
+    plan["day_combos"][0]["book_odds"] = 1.33 ** 5
+    text = telegram_bot.format_day_combos(plan)
+    assert "Sporttip mind. <b>1.25</b>" in text and "live 1.33 (Bet365)" in text
+    assert "Live-Gesamtquote" in text and "/sporttip T1" in text

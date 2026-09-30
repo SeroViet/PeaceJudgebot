@@ -92,6 +92,23 @@ def enabled_leagues(engine: Engine) -> list[str]:
 # ----------------------------------------------------------------------------- Daten
 
 
+def live_sports(engine: Engine, plan: dict, hours: float = 30.0) -> list[tuple[str, str]]:
+    """(sport_key, Titel) der Wettbewerbe, deren Spiele in der Tageskombi der nächsten Stunden stehen."""
+    from fussball.data.odds_api import SPORT_KEYS
+    from fussball.data.schema import Competition
+
+    now, out = utcnow(), {}
+    codes = {l["comp"] for c in plan.get("day_combos", []) for l in c["legs"]
+             if now < datetime.fromisoformat(l["kickoff"]) <= now + timedelta(hours=hours)}
+    if not codes:
+        return []
+    with session_scope(engine) as s:
+        names = dict(s.execute(select(Competition.code, Competition.name).where(Competition.code.in_(codes))).all())
+    for code in sorted(codes):
+        out[SPORT_KEYS.get(code, code)] = names.get(code, code)
+    return list(out.items())
+
+
 def lite_mode() -> bool:
     """Sparmodus (Standard): nur Pinnacle-Quoten weltweit, ohne Liga-Historie und eigenes Modell.
     Braucht ~150 MB statt >1 GB RAM und reicht für Tageskombis und sichere Tipps, weil das eigene
@@ -99,12 +116,12 @@ def lite_mode() -> bool:
     return os.getenv("FULL_MODEL", "0") != "1"
 
 
-def update_data(engine: Engine) -> dict:
+def update_data(engine: Engine, live: list[tuple[str, str]] | None = None) -> dict:
     """Laufende Saison (inkl. 2. Ligen für Aufsteiger) und kommende Spiele laden."""
     from fussball.models.backtest import RELATED_LEAGUES
 
     if lite_mode():
-        return {"odds_api": world_scan(engine), "at": utcnow().isoformat()}
+        return {"odds_api": world_scan(engine, live=live), "at": utcnow().isoformat()}
 
     settings = get_settings()
     leagues = load_leagues()
@@ -121,7 +138,7 @@ def update_data(engine: Engine) -> dict:
     except Exception as exc:  # noqa: BLE001
         log.exception("fixtures.csv fehlgeschlagen")
         fixtures = {"error": repr(exc)}
-    odds_api = world_scan(engine)
+    odds_api = world_scan(engine, live=live)
     return {"seasons": results, "fixtures": fixtures, "odds_api": odds_api, "at": utcnow().isoformat()}
 
 
@@ -256,11 +273,13 @@ def _save_odds_state(engine: Engine, st: dict) -> None:
             s.add(AppSetting(key="odds_api_state", value=st))
 
 
-def world_scan(engine: Engine, hours: float = 30.0) -> dict:
+def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] | None = None) -> dict:
     """Alle Fussball-Wettbewerbe weltweit (inkl. Nations League, WM-Quali) nach Spielen in den
     nächsten `hours` Stunden durchsuchen (gratis) und für die Wettbewerbe mit den meisten
     Spielen Quoten holen (2 Credits je Wettbewerb), innerhalb des Tagesbudgets.
-    Danach Ergebnisse für Wettbewerbe mit offenen, vergangenen Spielen (2 Credits)."""
+    Danach Ergebnisse für Wettbewerbe mit offenen, vergangenen Spielen (2 Credits).
+    `live`: (sport_key, Titel) der Wettbewerbe der aktuellen Tageskombi – deren Quoten werden
+    alle ODDS_API_LIVE_HOURS neu geholt; dafür bleiben ODDS_API_LIVE_CREDITS im Budget reserviert."""
     from fussball.data.odds_api import OddsApiClient, import_generic, import_scores, upcoming_counts
 
     client = OddsApiClient()
@@ -268,6 +287,8 @@ def world_scan(engine: Engine, hours: float = 30.0) -> dict:
         return {"error": "ODDS_API_KEY fehlt – ohne Pinnacle-Quoten keine Tipps"}
     budget = int(os.getenv("ODDS_API_DAILY_CREDITS", "16"))
     interval = float(os.getenv("ODDS_API_INTERVAL_HOURS", "24"))
+    reserve = int(os.getenv("ODDS_API_LIVE_CREDITS", "4")) if live else 0
+    live_every = float(os.getenv("ODDS_API_LIVE_HOURS", "3"))
     st = _odds_state(engine)
     out: dict = {"fetched": {}, "scores": {}}
     try:
@@ -292,11 +313,22 @@ def world_scan(engine: Engine, hours: float = 30.0) -> dict:
             last = st["last"].get(sport)
             if last and utcnow() - datetime.fromisoformat(last) < timedelta(hours=interval):
                 continue
-            if st["spent"] + 2 > budget:
+            if st["spent"] + 2 > budget - reserve:
                 out.setdefault("skipped", []).append(f"{title} ({n})")
                 continue
             with session_scope(engine) as s:
                 out["fetched"][title] = import_generic(s, client, sport, title)
+            st["spent"] += 2
+            st["last"][sport] = utcnow().isoformat()
+        # Live-Quoten für die Spiele der Tageskombi
+        for sport, title in live or []:
+            last = st["last"].get(sport)
+            if last and utcnow() - datetime.fromisoformat(last) < timedelta(hours=live_every):
+                continue
+            if st["spent"] + 2 > budget:
+                break
+            with session_scope(engine) as s:
+                out.setdefault("live", {})[title] = import_generic(s, client, sport, title)
             st["spent"] += 2
             st["last"][sport] = utcnow().isoformat()
     except Exception as exc:  # noqa: BLE001
@@ -459,6 +491,38 @@ def day_combos(forecasts: list[MatchForecast], sizes=(5, 6), min_prob: float = 0
             out.append({"day": day, "size": n, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
                         "leg_min": min(t["prob"] for t in chosen), "widened": band > 0})
     return out
+
+
+EXCHANGES = {"PS", "BFE", "MBK"}  # Pinnacle nur als Referenz, Börsen nicht als Buchmacher
+
+
+def attach_book_odds(engine: Engine, combos: list[dict], books: list[str] | None = None) -> None:
+    """Aktuelle Buchmacher-Quoten (letzter Abruf) an die Legs der Tageskombis hängen:
+    beste Quote + Buchmacher + Pinnacle-Quote + Zeitpunkt. Für 1X2 und Über/Unter;
+    doppelte Chance und beide treffen gibt es bei der Quellen-API nicht → nur faire Quote."""
+    from fussball.data.schema import Odds
+
+    with session_scope(engine) as s:
+        for c in combos:
+            for leg in c["legs"]:
+                if leg["market"] == "1X2":
+                    market, line = "1X2", 0.0
+                elif leg["market"].startswith("OU"):
+                    market, line = "OU", float(leg["market"][2:])
+                else:
+                    continue
+                rows = s.execute(select(Odds.bookmaker, Odds.price, Odds.known_at).where(
+                    Odds.match_id == leg["match_id"], Odds.market == market, Odds.line == line,
+                    Odds.selection == leg["selection"], Odds.is_closing.is_(False), Odds.source == "odds-api")).all()
+                ps = next((p for b, p, _ in rows if b == "PS"), None)
+                offers = [(p, b, t) for b, p, t in rows if b not in EXCHANGES and (not books or b in books)]
+                if ps:
+                    leg["ps_odds"] = ps
+                if offers:
+                    price, book, at = max(offers)
+                    leg.update(book_odds=price, book=BOOK_NAMES.get(book, book), odds_at=at.isoformat())
+            if all(l.get("book_odds") for l in c["legs"]):
+                c["book_odds"] = float(np.prod([l["book_odds"] for l in c["legs"]]))
 
 
 def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,

@@ -426,33 +426,46 @@ def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob
     return out
 
 
+# Reicht der Bereich 75–88 % an einem Tag nicht für 5 Spiele, schrittweise erweitern,
+# damit trotzdem jeden Tag eine Kombi kommt (im Text markiert).
+WIDER_BANDS = ((0.70, 0.90), (0.65, 0.92))
+
+
 def day_combos(forecasts: list[MatchForecast], sizes=(5, 6), min_prob: float = 0.75, max_prob: float = 0.88,
-               tz: str = "Europe/Zurich") -> list[dict]:
+               tz: str = "Europe/Zurich", widen: bool = True) -> list[dict]:
     """Tageskombis: alle Spiele am selben Kalendertag, ein Tipp pro Spiel, die sichersten zuerst."""
     from zoneinfo import ZoneInfo
 
     zone = ZoneInfo(tz)
-    by_day: dict[str, list[dict]] = {}
-    for t in best_tip_per_match(forecasts, min_prob, max_prob):
-        day = datetime.fromisoformat(t["kickoff"]).replace(tzinfo=ZoneInfo("UTC")).astimezone(zone).date().isoformat()
-        by_day.setdefault(day, []).append(t)
+    bands = [(min_prob, max_prob), *(WIDER_BANDS if widen else ())]
+    per_band: list[dict[str, list[dict]]] = []
+    for lo, hi in bands:
+        by_day: dict[str, list[dict]] = {}
+        for t in best_tip_per_match(forecasts, lo, hi):
+            day = datetime.fromisoformat(t["kickoff"]).replace(tzinfo=ZoneInfo("UTC")).astimezone(zone).date().isoformat()
+            by_day.setdefault(day, []).append(t)
+        per_band.append(by_day)
     out = []
-    for day in sorted(by_day):
-        legs = sorted(by_day[day], key=lambda t: -t["prob"])
+    for day in sorted({d for b in per_band for d in b}):
+        band = next((i for i, b in enumerate(per_band) if len(b.get(day, [])) >= min(sizes)), None)
+        if band is None:
+            continue
+        legs = sorted(per_band[band][day], key=lambda t: -t["prob"])
         for n in sizes:
             if len(legs) < n:
                 continue
             chosen = sorted(legs[:n], key=lambda t: t["kickoff"])
             prob = float(np.prod([t["prob"] for t in chosen]))
             out.append({"day": day, "size": n, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
-                        "leg_min": min(t["prob"] for t in chosen)})
+                        "leg_min": min(t["prob"] for t in chosen), "widened": band > 0})
     return out
 
 
 def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,
                  max_rounds: int = 3) -> list[dict]:
     """Scout-Agent prüft die Legs der nächsten Tageskombi (innerhalb `horizon_h`).
-    Gestrichene Spiele werden ausgeschlossen und die Kombi neu gebaut (nachrücken)."""
+    Gestrichene Spiele werden ausgeschlossen und die Kombi neu gebaut (nachrücken);
+    Spiele mit „vorsicht“ ebenso, solange danach noch eine Kombi für den Tag zustande kommt."""
     from fussball.agents import runner
     from fussball.app.state import local
 
@@ -465,6 +478,12 @@ def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: floa
     dc = plan.config.get("day_combo", {})
     excluded: set[int] = set()
     results: dict[int, dict] = {}
+    pool = plan.all_forecasts or plan.forecasts
+
+    def rebuild(skip: set[int]) -> list[dict]:
+        return day_combos([f for f in pool if f.match_id not in skip], tuple(dc.get("sizes", [5, 6])),
+                          dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
+
     for _ in range(max_rounds):
         legs = {l["match_id"]: l for c in plan.day_combos if c["day"] == day for l in c["legs"]}
         todo = [l for mid, l in legs.items() if mid not in results]
@@ -472,12 +491,17 @@ def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: floa
             break
         for r in runner.analyze_legs(engine, todo, client=client, local_time=local):
             results[r["match_id"]] = r
-        new_excl = {mid for mid, r in results.items() if r["assessment"] == "streichen"} - excluded
-        if not new_excl:
+        struck = {mid for mid, r in results.items() if r["assessment"] == "streichen"}
+        risky = {mid for mid, r in results.items() if r["assessment"] == "vorsicht"}
+        # ⚠️-Spiele nur ersetzen, wenn es danach trotzdem eine Kombi für den Tag gibt
+        target = struck | risky
+        combos = rebuild(target)
+        if not any(c["day"] == day for c in combos):
+            target, combos = struck, rebuild(struck)
+        if target == excluded:
             break
-        excluded |= new_excl
-        plan.day_combos = day_combos([f for f in (plan.all_forecasts or plan.forecasts) if f.match_id not in excluded],
-                                     tuple(dc.get("sizes", [5, 6])), dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
+        excluded = target
+        plan.day_combos = combos
     for c in plan.day_combos:
         for leg in c["legs"]:
             if leg["match_id"] in results:

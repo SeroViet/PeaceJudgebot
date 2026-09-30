@@ -105,3 +105,22 @@ def test_due_lineup_checks_window():
     plan = {"day_combos": [{"legs": [{"match_id": 5, "kickoff": "2026-10-10T13:30:00"}]}]}
     assert due_lineup_checks(plan, datetime(2026, 10, 10, 12, 15), 75, set())
     assert not due_lineup_checks(plan, datetime(2026, 10, 10, 10, 0), 75, set())
+
+
+def test_apply_agents_replaces_caution_leg_if_possible(engine, fixture_bytes, bundesliga, monkeypatch):
+    monkeypatch.setattr(runner, "fatigue_context", lambda e, mid: "ctx")
+    plan = _plan_with_matches(engine, fixture_bytes, bundesliga)
+    risky = plan.day_combos[0]["legs"][0]["match"]
+    service.apply_agents(engine, plan, client=FakeClient({risky: "vorsicht"}))
+    legs = plan.day_combos[0]["legs"]
+    assert risky not in {l["match"] for l in legs} and len(legs) == 5
+
+
+def test_apply_agents_keeps_caution_leg_without_replacement(engine, fixture_bytes, bundesliga, monkeypatch):
+    monkeypatch.setattr(runner, "fatigue_context", lambda e, mid: "ctx")
+    plan = _plan_with_matches(engine, fixture_bytes, bundesliga, n=5)  # kein Ersatz vorhanden
+    risky = plan.day_combos[0]["legs"][0]["match"]
+    service.apply_agents(engine, plan, client=FakeClient({risky: "vorsicht"}))
+    legs = plan.day_combos[0]["legs"]
+    assert risky in {l["match"] for l in legs}
+    assert next(l for l in legs if l["match"] == risky)["agent"]["assessment"] == "vorsicht"

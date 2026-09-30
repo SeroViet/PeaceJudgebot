@@ -69,3 +69,14 @@ def test_day_combos_same_day_one_tip_per_match():
         assert len({l["match_id"] for l in c["legs"]}) == c["size"]
         assert all(0.75 <= l["prob"] <= 0.88 and l["market"] != "OU0.5" for l in c["legs"])
         assert c["prob"] == pytest.approx(__import__("math").prod(l["prob"] for l in c["legs"]))
+
+
+def test_day_combos_widen_range_when_too_few():
+    from fussball.service import day_combos
+
+    fs = [MatchForecast(i, "D1", "BL", datetime(2026, 10, 10, 12 + i, 0), f"H{i}", f"A{i}", 1.5, 1.0,
+                        {}, {}, {}, None, None, 0.0, {}, implied={"OU1.5": {"O": 0.89, "U": 0.11}})
+          for i in range(5)]  # 89 %: ausserhalb 75–88 %, innerhalb 70–90 %
+    assert day_combos(fs, sizes=(5,), widen=False) == []
+    wide = day_combos(fs, sizes=(5,))
+    assert len(wide) == 1 and wide[0]["size"] == 5 and wide[0]["widened"]

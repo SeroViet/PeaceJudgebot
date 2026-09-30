@@ -106,11 +106,15 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
                               f" <i>({l.get('comp_name') or l.get('comp', '')})</i>\n"
                               f"     ➡️ <b>{l['label']}</b> ({l['prob']:.0%})"
                               f"{icon.get((l.get('agent') or {}).get('assessment'), '')}"
+                              + (f"\n     <i>⚠️ {l['agent']['reason']}</i>"
+                                 if (l.get("agent") or {}).get("assessment") == "vorsicht" else "")
                               for i, l in enumerate(c["legs"], 1))
+            wide = ("\n<i>Heute gibt es nicht genug Spiele im Bereich 75–88 %, darum etwas "
+                    "breiter gewählt.</i>" if c.get("widened") else "")
             out.append(f"🎯 <b>{c['id']} · {c['size']}er-Tageskombi {d}</b>\n{legs}\n"
                        f"Trefferchance gesamt <b>{c['prob']:.0%}</b> · faire Gesamtquote <b>{c['fair_odds']:.2f}</b>\n"
                        f"Nur spielen, wenn Sporttip ≥ {c['fair_odds']:.2f} zahlt.\n"
-                       f"<i>Backtest {c['size']}er: {DAY_BT.get(str(c['size']), '')}</i>")
+                       f"<i>Backtest {c['size']}er: {DAY_BT.get(str(c['size']), '')}</i>{wide}")
     return "\n\n".join(out)
 
 
@@ -123,7 +127,7 @@ def format_today(plan: dict) -> str:
     if any(c["day"] == today for c in combos):
         return format_day_combos({**plan, "day_combos": [c for c in combos if c["day"] == today]}, max_days=1)
     upcoming = sorted({c["day"] for c in combos if c["day"] > today})
-    msg = "📭 Heute gibt es weltweit keine 5 Spiele mit genügend sicheren Pinnacle-Tipps (75–88 %)."
+    msg = "📭 Heute gibt es weltweit keine 5 Spiele mit genügend sicheren Pinnacle-Tipps (ab 65 %)."
     if upcoming:
         return msg + "\nNächste Tageskombi:\n\n" + format_day_combos(
             {**plan, "day_combos": [c for c in combos if c["day"] == upcoming[0]]}, max_days=1)

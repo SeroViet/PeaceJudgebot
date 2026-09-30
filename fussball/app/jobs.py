@@ -3,7 +3,7 @@
 - Start: Telegram-Meldung; bei leerer Datenbank zuerst Historie laden (Erststart)
 - alle REFRESH_HOURS (Standard 3): Daten laden, Wetten abrechnen, Tipps neu berechnen
   → Alarm bei neuen/gestrichenen Tipps, Ergebnis jeder abgerechneten Wette
-- täglich um DAILY_REPORT_TIME (Europe/Zurich, Standard 09:00): Tipps des Tages
+- täglich um DAILY_REPORT_TIME (Europe/Zurich, Standard 09:00): nur die Tageskombi (5–6 Spiele)
 - REMINDER_MINUTES (Standard 60) vor Anpfiff: Erinnerung mit Mindestquote
 - nach dem ersten Durchlauf nach dem Start: Tageskombi von heute (STARTUP_TIPS=0 schaltet ab)
 - Render-Gratisplan: alle 10 Minuten /healthz über die öffentliche Adresse aufrufen, damit der
@@ -98,15 +98,10 @@ async def _refresh_loop(engine):
             plan = state.load_plan()
             for c in info.get("combo_results", []):
                 await telegram_bot.notify(_bot, telegram_bot.format_combo_result(c))
-            new_intel = [a for a in info.get("agent", []) if not a.get("cached")]
-            for a in new_intel:
-                await telegram_bot.notify(_bot, a["text"] + ("\n\n🔁 Aus der Tageskombi gestrichen, Ersatz rückt nach."
-                                                            if a.get("removed") else ""))
-            if new_intel and any(a.get("removed") for a in new_intel):
-                await telegram_bot.notify(_bot, telegram_bot.format_day_combos(state.load_plan(), max_days=1))
-            if info.get("changes"):
-                await telegram_bot.notify(_bot, "🔔 <b>Tipps geändert</b>\n" + "\n".join(info["changes"])
-                                          + "\n\nDetails: /heute")
+            # Nur die Spiele: Hat der Scout Spiele der heutigen Kombi ersetzt, neue Kombi senden
+            if not first and any(a.get("removed") and not a.get("cached") for a in info.get("agent", [])):
+                await telegram_bot.notify(_bot, "🔁 <b>Tageskombi angepasst</b> (Scout hat Spiele ersetzt)\n\n"
+                                          + telegram_bot.format_today(plan))
             if info.get("settled_details"):
                 await telegram_bot.notify(_bot, format_settled(info["settled_details"], plan.get("currency", "CHF"))
                                           + "\n\n" + telegram_bot.format_stats(engine))
@@ -136,10 +131,7 @@ async def _daily_loop():
     while True:
         await asyncio.sleep(_seconds_until(when))
         plan = state.load_plan()
-        await telegram_bot.notify(_bot, "☀️ <b>Tipps des Tages</b>\n\n" + telegram_bot.format_singles(plan)
-                                  + "\n\n" + telegram_bot.format_combos(plan))
         await telegram_bot.notify(_bot, "☀️ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))
-        await telegram_bot.notify(_bot, telegram_bot.format_safe(plan))
         await asyncio.sleep(60)
 
 
@@ -187,7 +179,7 @@ async def _reminder_loop(engine=None):
                     _reminded.add(f"L{leg['match_id']}")
                     res = await loop.run_in_executor(None, lambda leg=leg: runner.analyze_legs(
                         engine, [leg], max_age_h=0.3, local_time=state.local))
-                    if res and res[0]["assessment"] in ("vorsicht", "streichen"):
+                    if res and res[0]["assessment"] == "streichen":
                         await telegram_bot.notify(_bot, "📋 <b>Aufstellungs-Check vor Anpfiff</b>\n" + res[0]["text"])
         except Exception:  # noqa: BLE001
             log.exception("Erinnerung/Aufstellungs-Check fehlgeschlagen")

@@ -474,7 +474,11 @@ def build(engine) -> Application | None:
             data, rows, learned = await asyncio.get_running_loop().run_in_executor(None, work)
         except Exception as exc:  # noqa: BLE001
             log.exception("Screenshot fehlgeschlagen")
-            await reply(update, f"⚠️ Konnte das Bild nicht lesen: {exc}"[:300])
+            if "credit balance" in str(exc):
+                await reply(update, "💳 Dein Anthropic-Guthaben ist leer. Bitte auf console.anthropic.com unter "
+                                    "Settings → Billing Guthaben aufladen, dann das Bild nochmal schicken.")
+            else:
+                await reply(update, f"⚠️ Konnte das Bild nicht lesen: {exc}"[:300])
             return
         if not data.is_betting_slip or not data.legs:
             await reply(update, "Auf dem Bild habe ich keine Wetten mit Quoten gefunden. Bitte den Sporttip-Schein "

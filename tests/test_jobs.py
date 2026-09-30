@@ -64,3 +64,18 @@ def test_day_combo_shows_min_and_live_odds():
     text = telegram_bot.format_day_combos(plan)
     assert "Sporttip mind. <b>1.25</b>" in text and "live 1.33 (Bet365)" in text
     assert "Live-Gesamtquote" in text and "/sporttip T1" in text
+
+
+def test_today_without_combo_lists_remaining_games():
+    from datetime import datetime, timedelta
+
+    from fussball.app import state
+
+    later = (datetime.now(state.TZ) + timedelta(minutes=30))
+    if later.date() != datetime.now(state.TZ).date():
+        return  # kurz vor Mitternacht nicht prüfbar
+    kick = later.astimezone(__import__("zoneinfo").ZoneInfo("UTC")).replace(tzinfo=None).isoformat()
+    plan = {"day_combos": [], "safe": [{"match_id": 1, "match": "Lyon – Chelsea", "kickoff": kick,
+                                        "label": "Über 1.5 Tore", "prob": 0.8}]}
+    text = telegram_bot.format_today(plan)
+    assert "Heute noch als Einzeltipps" in text and "Lyon – Chelsea" in text and "1.25" in text

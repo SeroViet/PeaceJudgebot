@@ -180,9 +180,20 @@ def format_today(plan: dict) -> str:
     if any(c["day"] == today for c in combos):
         return format_day_combos({**plan, "day_combos": [c for c in combos if c["day"] == today]}, max_days=1)
     upcoming = sorted({c["day"] for c in combos if c["day"] > today})
-    msg = "📭 Heute gibt es weltweit keine 5 Spiele mit genügend sicheren Pinnacle-Tipps (ab 65 %)."
+    now = datetime.now(state.TZ)
+    rest: dict[int, dict] = {}
+    for t in plan.get("safe", []):  # pro Spiel der sicherste Tipp, nur Spiele, die heute noch kommen
+        k = state.local(t["kickoff"])
+        if k.date().isoformat() == today and k > now and t["prob"] > rest.get(t["match_id"], {}).get("prob", 0):
+            rest[t["match_id"]] = t
+    msg = "📭 Heute kommen weltweit keine 5 Spiele mehr mit sicheren Pinnacle-Tipps – darum keine Kombi."
+    if rest:
+        msg += "\n\n⚽ <b>Heute noch als Einzeltipps:</b>\n" + "\n".join(
+            f"  {state.local(t['kickoff']).strftime('%H:%M')} {t['match']}\n     ➡️ <b>{t['label']}</b> ({t['prob']:.0%})"
+            f" · Sporttip mind. <b>{1 / t['prob']:.2f}</b>"
+            for t in sorted(rest.values(), key=lambda t: t["kickoff"]))
     if upcoming:
-        return msg + "\nNächste Tageskombi:\n\n" + format_day_combos(
+        return msg + "\n\n📅 <b>Nächste Tageskombi:</b>\n\n" + format_day_combos(
             {**plan, "day_combos": [c for c in combos if c["day"] == upcoming[0]]}, max_days=1)
     return msg + " Sobald neue Spiele Quoten haben, melde ich mich."
 

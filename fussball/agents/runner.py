@@ -89,6 +89,15 @@ def fatigue_context(engine: Engine, match_id: int) -> str:
         return "\n".join(lines)
 
 
+def option_note(alt: dict) -> str:
+    """Kurzinfo zu einem möglichen Tipp für den Scout: Chance, faire Quote, geschätzte Sporttip-Quote."""
+    note = f"Chance {alt['prob']:.0%}, faire Quote {1 / alt['prob']:.2f}"
+    est = alt.get("sporttip_est")
+    if est:
+        note += f", Sporttip ca. {est:.2f} ({est * alt['prob'] - 1:+.0%} gegenüber fair)"
+    return note
+
+
 def recent_report(engine: Engine, match_id: int, max_age_h: float) -> AgentReport | None:
     with session_scope(engine) as s:
         r = s.scalars(select(AgentReport).where(
@@ -127,7 +136,8 @@ def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float
             res = scout.scout_match(client, leg["match"], str(kickoff), leg.get("comp_name") or leg.get("comp", ""),
                                     leg["label"], fatigue_context(engine, leg["match_id"]),
                                     alternatives=[a["label"] for a in leg.get("alternatives", [])] or None,
-                                    max_searches=searches)
+                                    max_searches=searches,
+                                    notes=[option_note(a) for a in leg.get("alternatives", [])] or None)
         except Exception as exc:  # noqa: BLE001 – ein Fehler darf die übrigen Spiele nicht stoppen
             log.exception("Scout fehlgeschlagen für %s", leg["match"])
             out.append({"match_id": leg["match_id"], "assessment": "fehler", "reason": repr(exc)[:200],

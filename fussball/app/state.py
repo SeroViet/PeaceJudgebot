@@ -89,6 +89,7 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
         info["settled"] = service.settle_bets(engine, details)
         info["settled_details"] = details
         plan = service.daily_plan(engine, days=days)
+        service.annotate_value(engine, plan.day_combos)
         info["agent"] = []
         # Agenten kosten Geld: nur auf Anforderung (täglicher Lauf), nie bei jedem Neustart/Refresh.
         # Ohne Agentenlauf werden die letzten Bewertungen (Cache) übernommen, ohne neue Kosten.
@@ -98,6 +99,7 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
             log.exception("Agenten fehlgeschlagen")
         for kind, attr in (("risky", "risky_combos"), ("krass", "krass_combos")):
             setattr(plan, attr, service.build_extra_combos(plan, kind))
+            service.annotate_value(engine, getattr(plan, attr))
             # AGENT_COMBOS: welche Zusatz-Kombis der Scout prüft (R = Risiko, X = Krass); die Tageskombi immer
             scope = os.getenv("AGENT_COMBOS", "R,X").upper()
             checked = agents and ("R" if kind == "risky" else "X") in scope

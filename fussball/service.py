@@ -674,6 +674,35 @@ def builder_combos(forecasts: list[MatchForecast], used_combos: list[dict], n: i
     return out
 
 
+def annotate_value(engine: Engine, combos: list[dict]) -> None:
+    """Geschätzte Sporttip-Quote (aus deinen Screenshots gelernt) an Legs und deren Alternativen hängen,
+    damit der Scout bei gleicher Faktenlage den Tipp mit dem besten Wert wählen kann."""
+    from fussball.agents import slip
+
+    table = slip.ratios(engine)
+    if not table:
+        return
+    for c in combos:
+        for leg in c["legs"]:
+            for t in [leg, *leg.get("alternatives", [])]:
+                t["sporttip_est"] = slip.estimate(table, t["market"], 1 / t["prob"])
+
+
+def _switch_to_best(combos: list[dict], results: dict[int, dict]) -> None:
+    """Hat der Scout einen anderen Tipp aus den Alternativen gewählt, diesen übernehmen."""
+    for c in combos:
+        for leg in c["legs"]:
+            r = results.get(leg["match_id"])
+            if r is None:
+                continue
+            alt = next((a for a in leg.get("alternatives", []) if a["label"] == r.get("best_tip")), None)
+            if alt and alt["label"] != leg["label"]:
+                leg.update(alt, switched_from=leg["label"])
+            leg["agent"] = {k: r[k] for k in ("assessment", "reason")}
+        c["prob"] = float(np.prod([l["prob"] for l in c["legs"]]))
+        c["fair_odds"], c["leg_min"] = 1 / c["prob"], min(l["prob"] for l in c["legs"])
+
+
 def _covers(new: list[dict], old: list[dict], day: str) -> bool:
     """Gibt es nach dem Ersetzen für den Tag noch jede Wettbewerbs-Art, die es vorher gab?"""
     cats = lambda cs: {c.get("cat") for c in cs if c["day"] == day}  # noqa: E731
@@ -718,11 +747,9 @@ def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h
         combos = build_extra_combos(plan, kind, skip=struck | risky)
         if not _covers(combos, before, day):
             combos = build_extra_combos(plan, kind, skip=struck)
+        annotate_value(engine, combos)
         setattr(plan, attr, combos)
-    for c in getattr(plan, attr):
-        for leg in c["legs"]:
-            if leg["match_id"] in res:
-                leg["agent"] = {k: res[leg["match_id"]][k] for k in ("assessment", "reason")}
+    _switch_to_best(getattr(plan, attr), res)
     return list(res.values())
 
 
@@ -746,8 +773,10 @@ def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: floa
     pool = plan.all_forecasts or plan.forecasts
 
     def rebuild(skip: set[int]) -> list[dict]:
-        return day_combos([f for f in pool if f.match_id not in skip], tuple(dc.get("sizes", [3, 5])),
-                          dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
+        combos = day_combos([f for f in pool if f.match_id not in skip], tuple(dc.get("sizes", [3, 5])),
+                            dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
+        annotate_value(engine, combos)
+        return combos
 
     for _ in range(max_rounds):
         legs = {l["match_id"]: l for c in sorted(plan.day_combos, key=lambda c: c["size"]) if c["day"] == day
@@ -768,18 +797,8 @@ def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: floa
             break
         excluded = target
         plan.day_combos = combos
-    for c in plan.day_combos:
-        for leg in c["legs"]:
-            r = results.get(leg["match_id"])
-            if r is None:
-                continue
-            # Der Scout darf nach seiner Recherche einen anderen Tipp aus dem sicheren Bereich wählen
-            alt = next((a for a in leg.get("alternatives", []) if a["label"] == r.get("best_tip")), None)
-            if alt and alt["label"] != leg["label"]:
-                leg.update(alt, switched_from=leg["label"])
-            leg["agent"] = {k: r[k] for k in ("assessment", "reason")}
-        c["prob"] = float(np.prod([l["prob"] for l in c["legs"]]))
-        c["fair_odds"], c["leg_min"] = 1 / c["prob"], min(l["prob"] for l in c["legs"])
+    # Der Scout darf nach seiner Recherche einen anderen Tipp aus dem sicheren Bereich wählen
+    _switch_to_best(plan.day_combos, results)
     return [{**r, "removed": r["match_id"] in excluded} for r in results.values()]
 
 

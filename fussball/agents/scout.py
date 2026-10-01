@@ -97,6 +97,9 @@ Aufstellung oder Belastung etwas Wesentliches (z. B. Torjäger fehlt bei einem �
 Stammtorhüter gesperrt bei einem Unter-Tipp, B-Elf wegen Rotation beim Favoriten)?
 Gibt es eine Liste möglicher Tipps, sage am Ende, welcher davon am besten zu den Fakten passt
 (z. B. beide Abwehrreihen geschwächt → eher Über-Tipp; Favorit rotiert → eher Tore-Tipp statt Sieg).
+Steht bei den Tipps eine geschätzte Sporttip-Quote, gilt: Wenn mehrere Tipps von den Fakten gleich gut
+gestützt werden, nimm den mit dem besten Verhältnis Sporttip-Quote zu fairer Quote (bester Wert).
+Die Fakten haben aber immer Vorrang – nie einen Tipp nur wegen der Quote wählen.
 Nenne keine eigenen Wahrscheinlichkeiten und keine Quoten."""
 
 
@@ -112,13 +115,18 @@ def _count_searches(content) -> int:
                and getattr(b, "name", "") == "web_search")
 
 
-def _options(alternatives: list[str] | None) -> str:
-    return ("\nMögliche Tipps (alle laut Markt sicher genug):\n" + "\n".join(f"- {a}" for a in alternatives)
-            if alternatives else "")
+def _options(alternatives: list[str] | None, notes: list[str] | None = None) -> str:
+    """Liste der möglichen Tipps, optional mit Chance, fairer Quote und geschätzter Sporttip-Quote."""
+    if not alternatives:
+        return ""
+    notes = notes or [""] * len(alternatives)
+    return ("\nMögliche Tipps (alle laut Markt sicher genug):\n"
+            + "\n".join(f"- {a}" + (f"  [{n}]" if n else "") for a, n in zip(alternatives, notes)))
 
 
 def research(client, match: str, kickoff_local: str, competition: str, tip: str, context: str,
-             model: str = MODEL, max_searches: int = 10, alternatives: list[str] | None = None) -> tuple[str, float, int]:
+             model: str = MODEL, max_searches: int = 10, alternatives: list[str] | None = None,
+             notes: list[str] | None = None) -> tuple[str, float, int]:
     """Schritt 1: Websuche. Gibt (Rechercheergebnis als Text, Kosten, Anzahl Suchen) zurück."""
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -127,7 +135,7 @@ def research(client, match: str, kickoff_local: str, competition: str, tip: str,
     user = (f"Heute ist {today} (Schweizer Zeit). Nutze nur Informationen, die für dieses Spiel aktuell sind; "
             "Artikel aus früheren Saisons oder vor dem letzten Spiel der Teams ignorieren.\n"
             f"Spiel: {match}\nWettbewerb: {competition}\nAnstoss (Schweizer Zeit): {kickoff_local}\n"
-            f"Zu prüfender Tipp: {tip}{_options(alternatives)}\nBekannte Daten aus unserer Datenbank:\n{context}\n\n"
+            f"Zu prüfender Tipp: {tip}{_options(alternatives, notes)}\nBekannte Daten aus unserer Datenbank:\n{context}\n\n"
             "Recherchiere jetzt und fasse alle Fakten mit Quellen-URLs zusammen.")
     messages = [{"role": "user", "content": user}]
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches}]
@@ -151,13 +159,13 @@ def research(client, match: str, kickoff_local: str, competition: str, tip: str,
 
 
 def structure(client, research_text: str, match: str, tip: str, model: str = MODEL,
-              alternatives: list[str] | None = None) -> tuple[MatchIntel, float]:
+              alternatives: list[str] | None = None, notes: list[str] | None = None) -> tuple[MatchIntel, float]:
     """Schritt 2: Rechercheergebnis in das feste Schema überführen (validiert)."""
     resp = client.beta.messages.parse(
         model=model, max_tokens=8000, output_format=MatchIntel, output_config={"effort": "low"},
         betas=[FALLBACK_BETA], fallbacks="default",
         messages=[{"role": "user", "content":
-                   f"Spiel: {match}\nTipp: {tip}{_options(alternatives)}\n\nRecherche:\n{research_text}\n\n"
+                   f"Spiel: {match}\nTipp: {tip}{_options(alternatives, notes)}\n\nRecherche:\n{research_text}\n\n"
                    "Übertrage die Recherche vollständig und ohne Erfindungen in das Schema. "
                    "Heimteam zuerst. Bewerte den Tipp (bestätigt/vorsicht/streichen). "
                    "best_tip: exakt einer der möglichen Tipps (Text unverändert) oder null."}],
@@ -168,10 +176,11 @@ def structure(client, research_text: str, match: str, tip: str, model: str = MOD
 
 
 def scout_match(client, match: str, kickoff_local: str, competition: str, tip: str, context: str,
-                model: str = MODEL, alternatives: list[str] | None = None, max_searches: int = 6) -> ScoutResult:
+                model: str = MODEL, alternatives: list[str] | None = None, max_searches: int = 6,
+                notes: list[str] | None = None) -> ScoutResult:
     text, c1, searches = research(client, match, kickoff_local, competition, tip, context, model,
-                                  max_searches=max_searches, alternatives=alternatives)
-    intel, c2 = structure(client, text, match, tip, model, alternatives=alternatives)
+                                  max_searches=max_searches, alternatives=alternatives, notes=notes)
+    intel, c2 = structure(client, text, match, tip, model, alternatives=alternatives, notes=notes)
     if intel.best_tip not in (alternatives or []):
         intel.best_tip = None
     return ScoutResult(intel, c1 + c2, searches, model)

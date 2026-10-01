@@ -32,6 +32,7 @@ class FakeClient:
 
         def create(**kw):
             self.calls += 1
+            self.last_research = kw["messages"][0]["content"]
             return SimpleNamespace(stop_reason="end_turn", usage=usage, content=[
                 SimpleNamespace(type="server_tool_use", name="web_search"),
                 SimpleNamespace(type="text", text="Recherche " + kw["messages"][0]["content"][:40])])
@@ -187,3 +188,36 @@ def test_costs_include_screenshots_and_stop_below_limit(engine, fixture_bytes, b
     assert runner.spent_today(engine) <= 1.0  # Limit wird nie überschritten
     text = runner.cost_summary(engine)
     assert "Screenshots: 2" in text and "von 1.00 $" in text
+
+
+def test_scout_gets_sporttip_value_per_option(engine, fixture_bytes, bundesliga, monkeypatch):
+    from fussball.agents import slip
+
+    monkeypatch.setattr(runner, "fatigue_context", lambda e, mid: "ctx")
+    table = {k: {"ratio": 0.93, "n": 5} for k in ("OU", "DC", "1X2", "BTTS", "TEAM")}
+    monkeypatch.setattr(slip, "ratios", lambda e: table)
+    plan = _plan_with_matches(engine, fixture_bytes, bundesliga)
+    service.annotate_value(engine, plan.day_combos)
+    leg = plan.day_combos[0]["legs"][0]
+    assert all(a.get("sporttip_est") for a in leg["alternatives"])
+    note = runner.option_note(leg["alternatives"][0])
+    assert "Sporttip ca." in note and "gegenüber fair" in note
+    client = FakeClient({})
+    service.apply_agents(engine, plan, client=client)
+    assert "Sporttip ca." in str(client.last_research)  # Scout sieht die Quoten-Info
+
+
+def test_value_only_drops_combos_paying_below_fair(monkeypatch):
+    from datetime import datetime as dt
+
+    from fussball.app import state, telegram_bot
+
+    today = dt.now(state.TZ).date().isoformat()
+    leg = lambda est: {"match_id": 1, "match": "A – B", "kickoff": f"{today}T23:00:00", "comp": "D1",  # noqa: E731
+                       "label": "Über 1.5 Tore", "prob": 0.8, "market": "OU1.5", "sporttip_est": est}
+    good = {"id": "T1", "day": today, "size": 1, "legs": [leg(1.30)], "prob": 0.8, "fair_odds": 1.25, "cat": "liga"}
+    bad = {"id": "T2", "day": today, "size": 1, "legs": [leg(1.10)], "prob": 0.8, "fair_odds": 1.25, "cat": "liga"}
+    plan = {"day_combos": [good, bad], "risky_combos": [], "krass_combos": []}
+    monkeypatch.setenv("VALUE_ONLY", "1")
+    text = telegram_bot.format_today(plan)
+    assert "T1" in text and "T2 ·" not in text and "1 Kombi(s) weggelassen" in text

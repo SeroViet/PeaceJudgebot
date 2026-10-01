@@ -211,6 +211,16 @@ def format_slip(rows: list[dict], total_odds: float | None, learned: int) -> str
     return "\n".join(lines)
 
 
+def sporttip_estimate(c: dict) -> float | None:
+    """Geschätzte Sporttip-Gesamtquote einer Kombi (aus gelernten Screenshots), falls für alle Legs bekannt."""
+    if not c["legs"] or not all(l.get("sporttip_est") for l in c["legs"]):
+        return None
+    est = 1.0
+    for l in c["legs"]:
+        est *= l["sporttip_est"]
+    return est
+
+
 def format_day_combos(plan: dict, max_days: int = 2) -> str:
     combos = plan.get("day_combos", [])
     if not combos:
@@ -244,10 +254,8 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
                               for i, l in enumerate(c["legs"], 1))
             live = (f"Live-Gesamtquote (beste Buchmacher): <b>{c['book_odds']:.2f}</b>"
                     f"{_odds_time(c['legs'])}\n" if c.get("book_odds") else "")
-            if all(l.get("sporttip_est") for l in c["legs"]):
-                est = 1.0
-                for l in c["legs"]:
-                    est *= l["sporttip_est"]
+            est = sporttip_estimate(c)
+            if est is not None:
                 live += (f"Sporttip geschätzt (aus deinen Screenshots): <b>{est:.2f}</b> "
                          f"{'✅' if est >= c['fair_odds'] else '❌ unter fair'}\n")
             wide = ("\n<i>Heute gibt es nicht genug Spiele im Bereich 75–88 %, darum etwas "
@@ -280,14 +288,22 @@ def format_today(plan: dict) -> str:
 
     today = datetime.now(state.TZ).date().isoformat()
     every = [c for k in ("day_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) if c["day"] == today]
+    dropped = 0
+    if os.getenv("VALUE_ONLY") == "1":  # Nur-Value-Modus: Kombis weglassen, die bei Sporttip vermutlich Verlust sind
+        keep = [c for c in every if sporttip_estimate(c) is None or sporttip_estimate(c) >= c["fair_odds"]]
+        dropped, every = len(every) - len(keep), keep
+        plan = {**plan, **{k: [c for c in plan.get(k, []) if c in keep or c["day"] != today]
+                           for k in ("day_combos", "risky_combos", "krass_combos")}}
+    note = (f"\n\n🧮 {dropped} Kombi(s) weggelassen – Sporttip zahlt dort vermutlich weniger als fair."
+            if dropped else "")
     if any(c["day"] == today for c in plan.get("day_combos", [])):
         # Alle Kombis von heute, nach Wettbewerbs-Art getrennt (Frauen, Nationalteams, Europapokal, Ligen)
-        return format_day_combos({**plan, "day_combos": every}, max_days=1)
+        return format_day_combos({**plan, "day_combos": every}, max_days=1) + note
     text = _format_today_safe(plan, today)
     extra = [c for c in every if c.get("risky") or c.get("krass")]
     if extra:
         text += "\n\n" + format_day_combos({**plan, "day_combos": extra}, max_days=1)
-    return text
+    return text + note
 
 
 def _format_today_safe(plan: dict, today: str) -> str:

@@ -40,8 +40,7 @@ async def start(engine) -> list:
         await _bot.updater.start_polling(drop_pending_updates=True, timeout=5, poll_interval=1.0,
                                          error_callback=lambda e: log.warning("Telegram-Polling: %s", e))
         log.info("Telegram-Bot gestartet")
-        await telegram_bot.notify(_bot, "✅ <b>PeaceJudge gestartet</b>\nIch melde mich mit Tipps, Erinnerungen und "
-                                        "Ergebnissen. /start zeigt alle Befehle.")
+        await telegram_bot.notify(_bot, "✅ <b>PeaceJudge gestartet</b> · /top5 für die Tipps von heute")
     if _bot is not None:
         await _restore_costs(engine)
     if os.getenv("DISABLE_SCHEDULER") == "1":
@@ -152,7 +151,7 @@ async def _refresh_loop(engine):
                 log.warning("Odds API: %s", odds_err)
             if first:
                 first = False
-                await telegram_bot.notify(_bot, "⚽ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))
+                await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
         except Exception as exc:  # noqa: BLE001
             log.exception("Refresh fehlgeschlagen")
             await telegram_bot.notify(_bot, f"⚠️ Aktualisierung fehlgeschlagen: {exc!r}"[:500])
@@ -186,11 +185,11 @@ async def _daily_loop(engine=None):
                 break
             await asyncio.sleep(30)
         plan = state.load_plan()
-        await telegram_bot.notify(_bot, "☀️ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))
-        if engine is not None:
-            from fussball.agents import runner
+        await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
+        if os.getenv("DAILY_FULL", "0") == "1":  # ausführliche Kombis nur auf Wunsch, sonst /tageskombi
+            await telegram_bot.notify(_bot, "☀️ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))
+        # Kosten stehen in der angehefteten Nachricht 📌 und unter /kosten – keine Extra-Nachricht
 
-            await telegram_bot.notify(_bot, runner.cost_summary(engine))
         await asyncio.sleep(60)
 
 

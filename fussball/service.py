@@ -911,6 +911,7 @@ class DailyPlan:
     all_forecasts: list = field(default_factory=list)
     risky_combos: list[dict] = field(default_factory=list)
     krass_combos: list[dict] = field(default_factory=list)
+    top: list[dict] = field(default_factory=list)  # bester Tipp pro Spiel (für /top5)
 
 
 def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | None = None) -> DailyPlan:
@@ -933,6 +934,8 @@ def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | N
     days_ = day_combos(all_fc, tuple(dc.get("sizes", [3, 5])), dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
     plan = DailyPlan(forecasts, singles, combos, cfg, blocked, safe, days_)
     plan.all_forecasts = all_fc
+    plan.top = [{k: v for k, v in t.items() if k != "alternatives"}
+                for t in best_tip_per_match(all_fc, 0.72, 0.90)]
     return plan
 
 

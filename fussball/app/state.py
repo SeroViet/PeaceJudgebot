@@ -58,6 +58,7 @@ def serialize_plan(plan: service.DailyPlan) -> dict:
         "day_combos": [{**c, "id": f"T{i}"} for i, c in enumerate(plan.day_combos, start=1)],
         "risky_combos": [{**c, "id": f"R{i}"} for i, c in enumerate(plan.risky_combos, start=1)],
         "krass_combos": [{**c, "id": f"X{i}"} for i, c in enumerate(plan.krass_combos, start=1)],
+        "top": plan.top,
         "forecasts": [f.to_dict() for f in plan.forecasts],
         "singles": singles,
         "combos": combos,

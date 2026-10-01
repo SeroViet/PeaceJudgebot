@@ -58,6 +58,58 @@ def tip(label: str) -> str:
     return f"<code>{html.escape(label)}</code>"
 
 
+SHORT_CAT = {"frauen": "👩 Frauen", "national": "🌍 Länderspiele", "europa": "🏆 Europapokal", "liga": "⚽ Ligen"}
+
+
+def top_tips(plan: dict, n: int = 5, day: str | None = None) -> dict[str, list[dict]]:
+    """Pro Wettbewerbs-Art die n besten Tipps von heute (ein Tipp pro Spiel, nur Spiele, die noch kommen).
+    Vom Scout gestrichene Spiele fallen weg."""
+    from datetime import datetime
+
+    from fussball.service import COMBO_MARKETS, EXCLUDED_TIPS, category
+
+    now = datetime.now(state.TZ)
+    day = day or now.date().isoformat()
+    agent = {l["match_id"]: (l.get("agent") or {}).get("assessment")
+             for k in ("day_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) for l in c["legs"]}
+    best: dict[int, dict] = {}
+    for t in plan.get("top") or plan.get("safe", []):
+        k = state.local(t["kickoff"])
+        if (k.date().isoformat() != day or k <= now or t["market"] not in COMBO_MARKETS
+                or (t["market"], t["selection"]) in EXCLUDED_TIPS or agent.get(t["match_id"]) == "streichen"):
+            continue
+        if t["prob"] > best.get(t["match_id"], {}).get("prob", 0):
+            best[t["match_id"]] = {**t, "agent": agent.get(t["match_id"])}
+    by_cat: dict[str, list[dict]] = {}
+    for t in sorted(best.values(), key=lambda t: -t["prob"]):
+        by_cat.setdefault(category(t["comp"], t.get("comp_name")), []).append(t)
+    return {c: sorted(ts[:n], key=lambda t: t["kickoff"]) for c, ts in by_cat.items()}
+
+
+def format_top5(plan: dict, n: int = 5) -> str:
+    """Kurz und klar: die besten Tipps von heute, je Wettbewerbs-Art, eine Zeile pro Spiel."""
+    groups = top_tips(plan, n)
+    if not groups:
+        return "📭 Heute keine sicheren Tipps mehr. Morgen früh kommen neue."
+    icon = {"bestätigt": " ✅", "vorsicht": " ⚠️"}
+    out = ["🔥 <b>Top-Tipps heute</b>"]
+    for cat in ("frauen", "national", "europa", "liga"):
+        ts = groups.get(cat)
+        if not ts:
+            continue
+        out.append(f"\n<b>{SHORT_CAT[cat]}</b>")
+        prob = 1.0
+        for t in ts:
+            prob *= t["prob"]
+            out.append(f"<b>{state.local(t['kickoff']).strftime('%H:%M')} {t['match']}</b>\n"
+                       f"➡️ {tip(t['label'])} · {t['prob']:.0%} · mind. {1 / t['prob']:.2f}"
+                       f"{icon.get(t.get('agent'), '')}")
+        if len(ts) > 1:
+            out.append(f"<i>Alle {len(ts)} als Kombi: Chance {prob:.0%} · fair {1 / prob:.2f}</i>")
+    out.append("\n<i>„mind.“ = Quote, die Sporttip mindestens zahlen muss. Mehr: /tageskombi · /risiko · /krass</i>")
+    return "\n".join(out)
+
+
 def format_safe(plan: dict, limit: int = 15) -> str:
     safe = plan.get("safe", [])
     if not safe:
@@ -390,13 +442,14 @@ def format_stats(engine) -> str:
 
 
 COMMANDS = [
+    ("top5", "Die 5 besten Tipps von heute – kurz"),
     ("tageskombi", "3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("risiko", "Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8"),
     ("krass", "Krass-Kombi: 3 BetBuilder, Quote ca. 8–25"),
     ("sporttip", "Sporttip-Quoten prüfen: /sporttip T1 1.30 1.25 …"),
     ("kosten", "Claude-Kosten heute"),
     ("sicher", "Tipps mit hoher Trefferquote"),
-    ("heute", "Value-Tipps und Sicher-Tipps"),
+    ("heute", "Top-Tipps von heute (wie /top5)"),
     ("analyse", "Agenten-Analyse: /analyse Team"),
     ("spiel", "Prognose zu einem Spiel: /spiel Team"),
     ("kombi", "Value-Kombis"),
@@ -437,7 +490,7 @@ def build(engine) -> Application | None:
                 "Trage sie beim Server als TELEGRAM_OWNER_ID ein und starte den Dienst neu. "
                 "Danach antworte ich nur noch dir.")
             return
-        await reply(update, "👋 PeaceJudge ist bereit.\n/heute – Tipps\n/kombi – Kombis\n/spiel Team – Prognose\n"
+        await reply(update, "👋 PeaceJudge ist bereit.\n/top5 – die 5 besten Tipps von heute\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/tageskombi – 3er- und 5er-Kombi, alle Spiele am selben Tag\n"
                             "/risiko – Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8\n"
                             "/krass – Krass-Kombi: 3 BetBuilder, Quote ca. 8–25\n"
@@ -448,9 +501,7 @@ def build(engine) -> Application | None:
                             "/update – neu berechnen")
 
     async def cmd_today(update: Update, _ctx):
-        plan = state.load_plan()
-        await reply(update, format_singles(plan))
-        await reply(update, format_safe(plan))
+        await reply(update, format_top5(state.load_plan()))
 
     async def cmd_analyse(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         from fussball.agents import runner, scout
@@ -594,7 +645,7 @@ def build(engine) -> Application | None:
 
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CommandHandler("start", cmd_start))
-    for name, fn in (("heute", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
+    for name, fn in (("heute", cmd_today), ("top5", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update),
                      ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("kosten", cmd_costs)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))

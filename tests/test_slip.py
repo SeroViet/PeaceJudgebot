@@ -31,7 +31,7 @@ def fake_client(legs, total=None):
     def parse(**kw):
         seen.update(kw)
         return SimpleNamespace(stop_reason="end_turn", usage=usage,
-                               parsed_output=slip.Slip(is_betting_slip=True, legs=legs, total_odds=total))
+                               parsed_output=slip.Slip(is_betting_slip=True, bookmaker="Sporttip", legs=legs, total_odds=total))
 
     return SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(parse=parse))), seen
 
@@ -61,7 +61,7 @@ def test_betbuilder_handicap_halftime_and_boost(engine):
     fair = 1 / joint_prob(2.3, 0.7, [Part("BTTS", "N"), Part("HCP", "H", -1), Part("OU", "U", 1.5, "1h")])
     boost = leg("Deutschland gewinnt (Boost)", [part("1X2", "H")], round(1.15 / f.implied["1X2"]["H"], 2), 1,
                 boosted=True)
-    data = slip.Slip(is_betting_slip=True, total_odds=None,
+    data = slip.Slip(is_betting_slip=True, bookmaker="Bet365", total_odds=None,
                      legs=[leg("BetBuilder", parts, 4.55, 1), boost])
     rows = slip.evaluate(data, [f])
     assert rows[0]["builder"] and rows[0]["key"] == "BB" and rows[0]["fair"] == pytest.approx(fair)
@@ -83,3 +83,18 @@ def test_estimate_after_enough_observations(engine):
     assert table["OU"]["n"] == 3 and table["OU"]["ratio"] == pytest.approx(0.92, abs=0.01)
     assert slip.estimate(table, "OU1.5", 1.25) == pytest.approx(1.15, abs=0.01)
     assert slip.estimate(table, "DC", 1.25) is None
+
+
+def test_bookmakers_learned_separately(engine):
+    fs = [forecast(i, f"H{i}", f"A{i}") for i in range(3)]
+    for book, ratio in (("Sporttip", 0.90), ("Bet365", 0.95)):
+        rows = []
+        for f in fs:
+            p = f.implied["OU2.5"]["O"]
+            rows.append({"leg": leg("Über 2.5", [part("OU", "O", 2.5)], round(ratio / p, 3), f.match_id),
+                         "match_id": f.match_id, "key": "OU2.5", "fair": 1 / p, "ratio": ratio,
+                         "match": f"{f.home} – {f.away}", "prob": p})
+        assert slip.remember(engine, rows, book) == 3
+    assert slip.ratios(engine)["OU"]["ratio"] == pytest.approx(0.90, abs=0.01)
+    assert slip.ratios(engine, "Bet365")["OU"]["ratio"] == pytest.approx(0.95, abs=0.01)
+    assert "Bet365-Schein geprüft" in telegram_bot.format_slip(rows, None, 3, "Bet365")

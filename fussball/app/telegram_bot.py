@@ -171,10 +171,11 @@ def check_sporttip(plan: dict, combo_id: str, quotes: list[float]) -> str:
     return "\n".join(lines)
 
 
-def format_slip(rows: list[dict], total_odds: float | None, learned: int) -> str:
+def format_slip(rows: list[dict], total_odds: float | None, learned: int, book: str = "Sporttip") -> str:
     """Antwort auf einen Sporttip-Screenshot: jede Wette (auch BetBuilder, Handicap, 1. HZ, Boost) gegen
     die faire Quote. 💎 = Sporttip zahlt mehr als fair (Value)."""
-    lines = ["🇨🇭 <b>Sporttip-Schein geprüft</b>"]
+    name = book if book != "andere" else "Wett"
+    lines = [f"{'🟢' if book == 'Bet365' else '🇨🇭'} <b>{name}-Schein geprüft</b>"]
     fair_total, st_total, complete, value = 1.0, 1.0, True, []
     for r in rows:
         leg = r["leg"]
@@ -189,11 +190,11 @@ def format_slip(rows: list[dict], total_odds: float | None, learned: int) -> str
         icon = "💎" if edge >= 0.02 else "✅" if edge >= 0 else "⚠️" if edge >= -0.05 else "❌"
         if edge >= 0.02:
             value.append((edge, r))
-        lines.append(f"{icon} {mark}<b>{r['match']}</b> · {tip(leg.market_text)}: Sporttip <b>{leg.odds:.2f}</b> / "
+        lines.append(f"{icon} {mark}<b>{r['match']}</b> · {tip(leg.market_text)}: {name} <b>{leg.odds:.2f}</b> / "
                      f"fair {r['fair']:.2f} (<b>{edge:+.0%}</b>) · Chance {r['prob']:.0%}")
     priced = [r for r in rows if r["fair"]]
     if value:
-        lines.append("\n💎 <b>VALUE gefunden</b> – hier zahlt Sporttip mehr als fair:")
+        lines.append(f"\n💎 <b>VALUE gefunden</b> – hier zahlt {name} mehr als fair:")
         for edge, r in sorted(value, key=lambda x: -x[0])[:5]:
             lines.append(f"  • <b>{r['match']}</b> · {tip(r['leg'].market_text)} @ {r['leg'].odds:.2f} ({edge:+.0%})")
         lines.append("  <i>Am besten einzeln spielen, kleiner Einsatz (1–2 % der Wettkasse).</i>")
@@ -201,13 +202,13 @@ def format_slip(rows: list[dict], total_odds: float | None, learned: int) -> str
         v = total_odds / fair_total - 1
         verdict = ("✅ <b>Gute Quote</b> – spielbar." if v >= 0 else
                    "⚠️ Knapp unter fair – wenn, dann nur kleiner Einsatz." if v >= -0.05 else
-                   "❌ <b>Zu tief</b> – Sporttip zahlt zu wenig; Wetten mit ❌ weglassen.")
-        lines.append(f"\nWettschein: Sporttip <b>{total_odds:.2f}</b> · fair {fair_total:.2f} → <b>{v:+.1%}</b>\n"
+                   f"❌ <b>Zu tief</b> – {name} zahlt zu wenig; Wetten mit ❌ weglassen.")
+        lines.append(f"\nWettschein: {name} <b>{total_odds:.2f}</b> · fair {fair_total:.2f} → <b>{v:+.1%}</b>\n"
                      f"{verdict}\nTrefferchance gesamt {1 / fair_total:.0%}")
     elif not value and priced:
-        lines.append("\nKein Value auf diesem Bild – Sporttip zahlt überall weniger als fair.")
+        lines.append(f"\nKein Value auf diesem Bild – {name} zahlt überall weniger als fair.")
     if learned:
-        lines.append(f"\n📚 {learned} Quote(n) gelernt – damit schätze ich Sporttip-Quoten in den Tipps.")
+        lines.append(f"\n📚 {learned} {name}-Quote(n) gelernt – damit schätze ich {name}-Quoten in den Tipps.")
     return "\n".join(lines)
 
 
@@ -566,7 +567,8 @@ def build(engine) -> Application | None:
             data, cost = slip.read_slip(client, image, media, listing)
             runner.add_other_cost(engine, cost)
             rows = slip.evaluate(data, forecasts)
-            return data, rows, slip.remember(engine, rows)
+            book = data.bookmaker if data.bookmaker != "andere" else "Sporttip"
+            return data, rows, slip.remember(engine, rows, book)
 
         try:
             data, rows, learned = await asyncio.get_running_loop().run_in_executor(None, work)
@@ -582,7 +584,7 @@ def build(engine) -> Application | None:
             await reply(update, "Auf dem Bild habe ich keine Wetten mit Quoten gefunden. Bitte den Sporttip-Schein "
                                 "oder die Spielliste mit Quoten fotografieren.")
             return
-        await reply(update, format_slip(rows, data.total_odds, learned))
+        await reply(update, format_slip(rows, data.total_odds, learned, data.bookmaker))
 
     async def cmd_update(update: Update, _ctx):
         await reply(update, "⟳ Aktualisiere Daten und Prognosen …")

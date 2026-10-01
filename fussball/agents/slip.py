@@ -50,13 +50,15 @@ class SlipLeg(BaseModel):
 
 class Slip(BaseModel):
     is_betting_slip: bool = Field(description="True, wenn das Bild Sportwetten mit Quoten zeigt")
+    bookmaker: Literal["Sporttip", "Bet365", "andere"] = Field(
+        description="Von welchem Anbieter der Screenshot ist (Logo/Farben: Sporttip/Swisslos rot, Bet365 grün-gelb)")
     legs: list[SlipLeg]
     total_odds: float | None = Field(description="Gesamtquote der Kombi auf dem Wettschein, falls angezeigt")
 
 
-PROMPT = """Das Bild ist ein Screenshot von Sporttip (Schweizer Sportwetten): ein Wettschein, eine Spielseite
+PROMPT = """Das Bild ist ein Screenshot von Sporttip (Swisslos) oder Bet365: ein Wettschein, eine Spielseite
 mit Quoten, ein BetBuilder oder eine Prämie/Boost. Lies jede Wette ab: Heimteam, Gastteam, Tipp, Quote.
-Sporttip-Begriffe: "Endergebnis 1/X/2" = 1X2; "1X", "X2", "12" = DC; "Over/Under Tore" = OU;
+Begriffe: "Endergebnis 1/X/2" bzw. "Spielergebnis" = 1X2; "Mehr als / Weniger als" = Über / Unter; "1X", "X2", "12" = DC; "Over/Under Tore" = OU;
 "Erzielen beide Teams ein Tor? Ja/Nein" = BTTS; "Team 1/2 Over/Under" = TEAM_OU; "Handicap 0:1" = HCP mit
 line -1; "Resultat 2:1" = CS; "1. Halbzeit - …" = gleicher Markt mit half 1h.
 Ein BetBuilder (mehrere Tipps im selben Spiel mit EINER Quote) ist EINE Wette mit mehreren parts.
@@ -147,17 +149,18 @@ def evaluate(slip: Slip, forecasts) -> list[dict]:
     return out
 
 
-def remember(engine: Engine, rows: list[dict]) -> int:
-    """Beobachtungen (Sporttip-Quote / faire Quote) speichern; gleiche Wette nur einmal."""
-    # Boosts nicht lernen: sie sind absichtlich erhöht und verfälschen die normale Sporttip-Marge
+def remember(engine: Engine, rows: list[dict], book: str = "Sporttip") -> int:
+    """Beobachtungen (Anbieter-Quote / faire Quote) speichern, je Anbieter getrennt; gleiche Wette nur einmal."""
+    # Boosts nicht lernen: sie sind absichtlich erhöht und verfälschen die normale Marge des Anbieters
     new = [{"match_id": r["match_id"], "key": r["key"], "sel": "+".join(p.selection for p in r["leg"].parts),
-            "odds": r["leg"].odds, "fair": r["fair"], "at": utcnow().isoformat()}
+            "odds": r["leg"].odds, "fair": r["fair"], "at": utcnow().isoformat(), "book": book}
            for r in rows if r.get("ratio") and not r["leg"].boosted]
     with session_scope(engine) as s:
         row = s.get(AppSetting, OBS_KEY)
         obs = list(row.value) if row and isinstance(row.value, list) else []
-        seen = {(o["match_id"], o["key"], o["sel"], round(o["odds"], 2)) for o in obs}
-        added = [o for o in new if (o["match_id"], o["key"], o["sel"], round(o["odds"], 2)) not in seen]
+        key = lambda o: (o.get("book", "Sporttip"), o["match_id"], o["key"], o["sel"], round(o["odds"], 2))  # noqa: E731
+        seen = {key(o) for o in obs}
+        added = [o for o in new if key(o) not in seen]
         obs = (obs + added)[-MAX_OBS:]
         if row:
             row.value = obs
@@ -166,14 +169,15 @@ def remember(engine: Engine, rows: list[dict]) -> int:
     return len(added)
 
 
-def ratios(engine: Engine) -> dict[str, dict]:
-    """Median von Sporttip-Quote / fairer Quote pro Tipp-Art (1X2, DC, OU, BTTS)."""
+def ratios(engine: Engine, book: str = "Sporttip") -> dict[str, dict]:
+    """Median von Anbieter-Quote / fairer Quote pro Tipp-Art (1X2, DC, OU, BTTS, TEAM, BB …)."""
     with session_scope(engine) as s:
         row = s.get(AppSetting, OBS_KEY)
         obs = list(row.value) if row and isinstance(row.value, list) else []
     by: dict[str, list[float]] = {}
     for o in obs:
-        by.setdefault(family(o["key"]), []).append(o["odds"] / o["fair"])
+        if o.get("book", "Sporttip") == book:
+            by.setdefault(family(o["key"]), []).append(o["odds"] / o["fair"])
     return {k: {"ratio": statistics.median(v), "n": len(v)} for k, v in by.items() if len(v) >= MIN_OBS}
 
 

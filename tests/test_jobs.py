@@ -36,7 +36,7 @@ def test_combo_result_and_today_formatting():
         {"won": False, "match": "C – D", "score": "0:0", "label": "Über 1.5 Tore"}]}
     text = telegram_bot.format_combo_result(c)
     assert "verloren" in text and "4 von 5 richtig" in text and "❌ C – D 0:0" in text
-    assert "keine 5 Spiele" in telegram_bot.format_today({"day_combos": []})
+    assert "keine 3 Spiele" in telegram_bot.format_today({"day_combos": []})
 
 
 def _combo():

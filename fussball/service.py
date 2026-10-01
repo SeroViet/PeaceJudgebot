@@ -436,15 +436,18 @@ def safe_tips(forecasts: list[MatchForecast], min_prob: float = 0.70, max_prob: 
     return out
 
 
-COMBO_MARKETS = ("1X2", "DC", "OU1.5", "OU2.5", "OU3.5", "BTTS")
-# Keine Tipps wie "12 (kein Unentschieden)" oder "X": wenig aussagekräftig
-EXCLUDED_TIPS = {("DC", "12"), ("1X2", "D")}
+# Teamtore ("Bayern trifft", "Bayern über 1.5 Tore") sind im Backtest im Bereich 70–88 % genauso gut
+# kalibriert wie Über/Unter gesamt und bringen Abwechslung in die Kombi.
+COMBO_MARKETS = ("1X2", "DC", "OU1.5", "OU2.5", "OU3.5", "BTTS", "HOME0.5", "AWAY0.5", "HOME1.5", "AWAY1.5")
+# Keine Tipps wie "12 (kein Unentschieden)", "X" oder "Team unter …": wenig aussagekräftig
+EXCLUDED_TIPS = {("DC", "12"), ("1X2", "D"), ("HOME0.5", "U"), ("AWAY0.5", "U"), ("HOME1.5", "U"), ("AWAY1.5", "U")}
+MAX_SAME_TIP = 2  # höchstens 2× derselbe Tipp (z. B. "Über 1.5 Tore") pro Kombi
 # Tore-Tipps (Über/Unter, beide treffen) werden bevorzugt, solange sie nur wenig unsicherer sind
 GOAL_BONUS = 0.04
 
 
 def _is_goal_market(market: str) -> bool:
-    return market.startswith("OU") or market == "BTTS"
+    return market.startswith(("OU", "HOME", "AWAY")) or market == "BTTS"
 
 
 def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob: float,
@@ -472,12 +475,29 @@ def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob
     return out
 
 
+def _varied(legs: list[dict], n: int, max_same: int = MAX_SAME_TIP) -> list[dict]:
+    """Die n sichersten Legs, aber höchstens `max_same`-mal derselbe Tipp; reicht das nicht, auffüllen."""
+    chosen, count, rest = [], {}, []
+    for t in legs:
+        # Tipp schon zu oft drin: nächstbesten Tipp desselben Spiels nehmen (falls im Bereich)
+        options = [t] + [{**t, **a} for a in t.get("alternatives", []) if a["label"] != t["label"]]
+        pick = next((o for o in options if count.get((o["market"], o["selection"]), 0) < max_same), None)
+        if pick is None:
+            rest.append(t)
+            continue
+        chosen.append(pick)
+        count[(pick["market"], pick["selection"])] = count.get((pick["market"], pick["selection"]), 0) + 1
+        if len(chosen) == n:
+            return chosen
+    return chosen + rest[: n - len(chosen)]
+
+
 # Reicht der Bereich 75–88 % an einem Tag nicht für 5 Spiele, schrittweise erweitern,
 # damit trotzdem jeden Tag eine Kombi kommt (im Text markiert).
 WIDER_BANDS = ((0.70, 0.90), (0.65, 0.92))
 
 
-def day_combos(forecasts: list[MatchForecast], sizes=(5, 6), min_prob: float = 0.75, max_prob: float = 0.88,
+def day_combos(forecasts: list[MatchForecast], sizes=(3, 5), min_prob: float = 0.75, max_prob: float = 0.88,
                tz: str = "Europe/Zurich", widen: bool = True) -> list[dict]:
     """Tageskombis: alle Spiele am selben Kalendertag, ein Tipp pro Spiel, die sichersten zuerst."""
     from zoneinfo import ZoneInfo
@@ -500,7 +520,7 @@ def day_combos(forecasts: list[MatchForecast], sizes=(5, 6), min_prob: float = 0
         for n in sizes:
             if len(legs) < n:
                 continue
-            chosen = sorted(legs[:n], key=lambda t: t["kickoff"])
+            chosen = sorted(_varied(legs, n), key=lambda t: t["kickoff"])
             prob = float(np.prod([t["prob"] for t in chosen]))
             out.append({"day": day, "size": n, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
                         "leg_min": min(t["prob"] for t in chosen), "widened": band > 0})
@@ -619,11 +639,12 @@ def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: floa
     pool = plan.all_forecasts or plan.forecasts
 
     def rebuild(skip: set[int]) -> list[dict]:
-        return day_combos([f for f in pool if f.match_id not in skip], tuple(dc.get("sizes", [5, 6])),
+        return day_combos([f for f in pool if f.match_id not in skip], tuple(dc.get("sizes", [3, 5])),
                           dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
 
     for _ in range(max_rounds):
-        legs = {l["match_id"]: l for c in plan.day_combos if c["day"] == day for l in c["legs"]}
+        legs = {l["match_id"]: l for c in sorted(plan.day_combos, key=lambda c: c["size"]) if c["day"] == day
+                for l in c["legs"]}  # kleinste Kombi zuerst: bei knappem Budget die wichtigsten Spiele
         todo = [l for mid, l in legs.items() if mid not in results]
         if not todo:
             break
@@ -782,7 +803,7 @@ def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | N
     sc = cfg.get("safe", {})
     safe = safe_tips(all_fc, sc.get("min_prob", 0.70), sc.get("max_prob", 0.90), sc.get("per_match", 2))
     dc = cfg.get("day_combo", {})
-    days_ = day_combos(all_fc, tuple(dc.get("sizes", [5, 6])), dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
+    days_ = day_combos(all_fc, tuple(dc.get("sizes", [3, 5])), dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
     plan = DailyPlan(forecasts, singles, combos, cfg, blocked, safe, days_)
     plan.all_forecasts = all_fc
     return plan

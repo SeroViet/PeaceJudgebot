@@ -77,7 +77,9 @@ def label(market: str, sel: str, home: str, away: str) -> str:
     if market.startswith(("HOME", "AWAY")):
         team = home if market.startswith("HOME") else away
         line = market[4:]
-        return f"{team} {'über' if sel == 'O' else 'unter'} {line} Tore"
+        if line == "0.5":
+            return f"{team} trifft (Team über 0.5 Tore)" if sel == "O" else f"{team} trifft nicht"
+        return f"{team} {'über' if sel == 'O' else 'unter'} {line} Tore (Team)"
     return f"{market} {sel}"
 
 

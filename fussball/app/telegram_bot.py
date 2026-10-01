@@ -89,7 +89,10 @@ def _find_legs(plan: dict, tip_id: str) -> list[dict] | None:
     return [t] if t else None
 
 
-DAY_BT = {"5": "46 % aufgegangen, Ø 4,3 von 5 richtig", "6": "41 % aufgegangen, Ø 5,2 von 6 richtig"}
+DAY_BT = {"3": "geht an ca. 6 von 10 Tagen auf (hochgerechnet aus 83 % pro Tipp)",
+          "5": "ging an 46 von 100 Tagen auf", "6": "ging an 41 von 100 Tagen auf"}
+# Einsatz-Empfehlung in % der eigenen Wettkasse: je unsicherer, desto kleiner
+STAKE_PCT = {"3": 2.0, "5": 1.0, "6": 1.0, "risky": 0.5}
 RISKY_BT = "Risiko: Einzeltipps dieser Art im Backtest ca. 65 % richtig. Nur kleiner Einsatz."
 
 
@@ -207,6 +210,9 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
             head = (f"🎲 <b>{c['id']} · Risiko-Kombi {d}</b> ({c['size']} Spiele, höhere Quote)" if c.get("risky")
                     else f"🎯 <b>{c['id']} · {c['size']}er-Tageskombi {d}</b>")
             bt = RISKY_BT if c.get("risky") else f"Backtest {c['size']}er: {DAY_BT.get(str(c['size']), '')}"
+            pct = STAKE_PCT["risky" if c.get("risky") else str(c["size"])] if (c.get("risky") or
+                                                                              str(c["size"]) in STAKE_PCT) else 1.0
+            bt += f"\n💰 Einsatz: höchstens {pct:g} % deiner Wettkasse (bei 200 CHF = {2 * pct:.0f} CHF)"
             out.append(f"{head}\n{legs}\n"
                        f"Trefferchance gesamt <b>{c['prob']:.0%}</b> · faire Gesamtquote <b>{c['fair_odds']:.2f}</b>\n"
                        f"{live}"
@@ -241,7 +247,7 @@ def _format_today_safe(plan: dict, today: str) -> str:
         k = state.local(t["kickoff"])
         if k.date().isoformat() == today and k > now and t["prob"] > rest.get(t["match_id"], {}).get("prob", 0):
             rest[t["match_id"]] = t
-    msg = "📭 Heute kommen weltweit keine 5 Spiele mehr mit sicheren Pinnacle-Tipps – darum keine Kombi."
+    msg = "📭 Heute kommen weltweit keine 3 Spiele mehr mit sicheren Pinnacle-Tipps – darum keine Kombi."
     if rest:
         msg += "\n\n⚽ <b>Heute noch als Einzeltipps:</b>\n" + "\n".join(
             f"  {state.local(t['kickoff']).strftime('%H:%M')} {t['match']}\n     ➡️ <b>{t['label']}</b> ({t['prob']:.0%})"
@@ -310,7 +316,7 @@ def format_stats(engine) -> str:
 
 
 COMMANDS = [
-    ("tageskombi", "5er/6er-Kombi, alle Spiele am selben Tag"),
+    ("tageskombi", "3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("risiko", "Risiko-Kombi: 3 Spiele mit höherer Quote"),
     ("sporttip", "Sporttip-Quoten prüfen: /sporttip T1 1.30 1.25 …"),
     ("sicher", "Tipps mit hoher Trefferquote"),
@@ -356,7 +362,7 @@ def build(engine) -> Application | None:
                 "Danach antworte ich nur noch dir.")
             return
         await reply(update, "👋 PeaceJudge ist bereit.\n/heute – Tipps\n/kombi – Kombis\n/spiel Team – Prognose\n"
-                            "/tageskombi – 5er/6er-Kombi, alle Spiele am selben Tag\n"
+                            "/tageskombi – 3er- und 5er-Kombi, alle Spiele am selben Tag\n"
                             "/risiko – Risiko-Kombi mit höherer Quote\n"
                             "/sporttip T1 Quoten – Sporttip-Quoten prüfen\n"
                             "📸 Screenshot vom Sporttip-Schein schicken – ich prüfe die Quoten\n"

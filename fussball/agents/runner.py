@@ -71,7 +71,7 @@ def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float
     client = client or (None if cached_only else scout.make_client())
     if client is None and not cached_only:
         return []
-    searches = max_searches or int(os.getenv("AGENT_MAX_SEARCHES", "6"))
+    searches = max_searches or int(os.getenv("AGENT_MAX_SEARCHES", "4"))
     out = []
     for leg in legs:
         cached = recent_report(engine, leg["match_id"], max_age_h)

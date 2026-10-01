@@ -116,3 +116,15 @@ def test_risky_combo_falls_back_to_safe_combo_matches():
                         None, None, 0.0, {}, implied={"OU2.5": {"O": 0.66, "U": 0.34}}) for i in range(3)]
     safe = [{"day": "2026-10-10", "legs": [{"match_id": 0}, {"match_id": 1}]}]
     assert len(risky_combos(fs, safe, size=3)[0]["legs"]) == 3
+
+
+def test_combo_varies_tips_and_offers_team_goals():
+    from fussball.service import day_combos
+
+    fs = [MatchForecast(i, "D1", "BL", datetime(2026, 10, 10, 12 + i, 0), f"H{i}", f"A{i}", 1.5, 1.0, {}, {}, {},
+                        None, None, 0.0, {}, implied={"OU1.5": {"O": 0.85, "U": 0.15},
+                                                      "HOME0.5": {"O": 0.80, "U": 0.20}}) for i in range(5)]
+    legs = day_combos(fs, sizes=(5,))[0]["legs"]
+    labels = [l["label"] for l in legs]
+    # höchstens 2× derselbe Tipp; erst wenn es nicht anders geht (nur 2 Tipp-Arten), wird aufgefüllt
+    assert sum("trifft" in x for x in labels) == 2 and labels.count("Über 1.5 Tore") == 3

@@ -51,8 +51,9 @@ def test_read_evaluate_and_learn(engine):
     assert rows[1]["fair"] is None  # Torschütze: nicht berechenbar
     assert slip.remember(engine, rows) == 1 and slip.remember(engine, rows) == 0  # nicht doppelt
     assert slip.ratios(engine) == {}  # erst ab 3 Beobachtungen
-    text = telegram_bot.format_slip(rows, None, 1)
-    assert "❌" in text and "nicht berechenbar" in text and "gelernt" in text
+    text = telegram_bot.format_slip(rows, [{"assessment": "bestätigt", "reason": "Stammelf komplett"},
+                                           {"assessment": None, "reason": "nicht geprüft"}])
+    assert "🟢" in text and "Stammelf komplett" in text and "⚪" in text and "fair" not in text
 
 
 def test_betbuilder_handicap_halftime_and_boost(engine):
@@ -66,8 +67,9 @@ def test_betbuilder_handicap_halftime_and_boost(engine):
     rows = slip.evaluate(data, [f])
     assert rows[0]["builder"] and rows[0]["key"] == "BB" and rows[0]["fair"] == pytest.approx(fair)
     assert rows[1]["ratio"] > 1.1
-    text = telegram_bot.format_slip(rows, None, 0)
-    assert "🧩" in text and "🚀" in text and "VALUE gefunden" in text
+    text = telegram_bot.format_slip(rows, [{"assessment": "bestätigt", "reason": ""},
+                                           {"assessment": "streichen", "reason": "Torjäger gesperrt"}], "Bet365")
+    assert "2 von 2 Tipps rot" in text and "Torjäger gesperrt" in text and "Nur ca. 19% Chance" in text
     assert slip.remember(engine, rows) == 1  # Boost wird nicht gelernt
 
 
@@ -97,4 +99,4 @@ def test_bookmakers_learned_separately(engine):
         assert slip.remember(engine, rows, book) == 3
     assert slip.ratios(engine)["OU"]["ratio"] == pytest.approx(0.90, abs=0.01)
     assert slip.ratios(engine, "Bet365")["OU"]["ratio"] == pytest.approx(0.95, abs=0.01)
-    assert "Bet365-Schein geprüft" in telegram_bot.format_slip(rows, None, 3, "Bet365")
+    assert "Bet365-Schein geprüft" in telegram_bot.format_slip(rows, [{}] * 3, "Bet365")

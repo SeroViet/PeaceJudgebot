@@ -70,8 +70,9 @@ def top_tips(plan: dict, n: int = 5, day: str | None = None) -> dict[str, list[d
 
     now = datetime.now(state.TZ)
     day = day or now.date().isoformat()
-    agent = {l["match_id"]: (l.get("agent") or {}).get("assessment")
-             for k in ("day_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) for l in c["legs"]}
+    reports = {l["match_id"]: (l.get("agent") or {})
+               for k in ("day_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) for l in c["legs"]}
+    agent = {mid: r.get("assessment") for mid, r in reports.items()}
     best: dict[int, dict] = {}
     for t in plan.get("top") or plan.get("safe", []):
         k = state.local(t["kickoff"])
@@ -79,7 +80,8 @@ def top_tips(plan: dict, n: int = 5, day: str | None = None) -> dict[str, list[d
                 or (t["market"], t["selection"]) in EXCLUDED_TIPS or agent.get(t["match_id"]) == "streichen"):
             continue
         if t["prob"] > best.get(t["match_id"], {}).get("prob", 0):
-            best[t["match_id"]] = {**t, "agent": agent.get(t["match_id"])}
+            best[t["match_id"]] = {**t, "agent": agent.get(t["match_id"]),
+                                   "reason": reports.get(t["match_id"], {}).get("reason", "")}
     from fussball.service import _varied
 
     by_cat: dict[str, list[dict]] = {}
@@ -94,7 +96,7 @@ def format_top5(plan: dict, n: int = 5) -> str:
     groups = top_tips(plan, n)
     if not groups:
         return "📭 Heute keine sicheren Tipps mehr. Morgen früh kommen neue."
-    icon = {"bestätigt": " ✅", "vorsicht": " ⚠️"}
+    icon = {"bestätigt": " 🟢", "vorsicht": " 🔴"}
     out = ["🔥 <b>Top-Tipps heute</b>"]
     for cat in ("frauen", "national", "europa", "liga"):
         ts = groups.get(cat)
@@ -105,11 +107,12 @@ def format_top5(plan: dict, n: int = 5) -> str:
         for t in ts:
             prob *= t["prob"]
             out.append(f"<b>{state.local(t['kickoff']).strftime('%H:%M')} {t['match']}</b>\n"
-                       f"➡️ {tip(t['label'])} · {t['prob']:.0%} · mind. {1 / t['prob']:.2f}"
-                       f"{icon.get(t.get('agent'), '')}")
+                       f"➡️ {tip(t['label'])} · {t['prob']:.0%}{icon.get(t.get('agent'), '')}"
+                       + (f"\n<i>🔴 {html.escape(t['reason'])}</i>" if t.get("agent") == "vorsicht" and t.get("reason")
+                          else ""))
         if len(ts) > 1:
-            out.append(f"<i>Alle {len(ts)} als Kombi: Chance {prob:.0%} · fair {1 / prob:.2f}</i>")
-    out.append("\n<i>„mind.“ = Quote, die Sporttip mindestens zahlen muss. Mehr: /tageskombi · /risiko · /krass</i>")
+            out.append(f"<i>Alle {len(ts)} als Kombi: Chance {prob:.0%}</i>")
+    out.append("\n<i>🟢 = Scout bestätigt · 🔴 = Scout warnt. Mehr: /tageskombi · /risiko · /krass</i>")
     return "\n".join(out)
 
 
@@ -161,12 +164,9 @@ DAY_BT = {"3": "geht an ca. 6 von 10 Tagen auf (hochgerechnet aus 83 % pro Tipp)
           "5": "ging an 46 von 100 Tagen auf", "6": "ging an 41 von 100 Tagen auf"}
 # Einsatz-Empfehlung in % der eigenen Wettkasse: je unsicherer, desto kleiner
 STAKE_PCT = {"3": 2.0, "5": 1.0, "6": 1.0, "risky": 0.5, "krass": 0.25}
-BUILDER_HOWTO = ("🧩 So setzen: bei Sporttip im Spiel auf „BetBuilder“ die Tipps eines Spiels zusammenstellen, "
-                 "dann die BetBuilder auf einen Schein. Geht das nicht: jeden BetBuilder einzeln.")
-KRASS_BT = ("Krass: 3 BetBuilder – Tipps, die oft gemeinsam eintreten, exakt aus allen Endständen gerechnet. "
-            "Geht etwa an 1 von 10 Tagen auf. Nur Mini-Einsatz.\n" + BUILDER_HOWTO)
-RISKY_BT = ("Risiko: 2 BetBuilder, exakt aus allen Endständen gerechnet. Geht etwa an 1 von 5 Tagen auf. "
-            "Nur kleiner Einsatz.\n" + BUILDER_HOWTO)
+BUILDER_HOWTO = "🧩 Pro Spiel im „BetBuilder“ zusammenstellen, dann auf einen Schein."
+KRASS_BT = "Geht etwa an 1 von 10 Tagen auf. Nur Mini-Einsatz.\n" + BUILDER_HOWTO
+RISKY_BT = "Geht etwa an 1 von 5 Tagen auf. Nur kleiner Einsatz.\n" + BUILDER_HOWTO
 
 
 def _leg_odds(l: dict) -> str:
@@ -226,44 +226,40 @@ def check_sporttip(plan: dict, combo_id: str, quotes: list[float]) -> str:
     return "\n".join(lines)
 
 
-def format_slip(rows: list[dict], total_odds: float | None, learned: int, book: str = "Sporttip") -> str:
-    """Antwort auf einen Sporttip-Screenshot: jede Wette (auch BetBuilder, Handicap, 1. HZ, Boost) gegen
-    die faire Quote. 💎 = Sporttip zahlt mehr als fair (Value)."""
+def verdict(row: dict, check: dict) -> tuple[bool | None, str]:
+    """🟢/🔴 für einen Tipp: rot, wenn der Scout ihn streicht oder warnt, oder die Chance unter 50 % liegt."""
+    a, reason, prob = check.get("assessment"), check.get("reason", ""), row.get("prob")
+    if a in ("streichen", "vorsicht"):
+        return False, reason
+    if prob is not None and prob < 0.5:
+        return False, f"Nur ca. {prob:.0%} Chance – geht öfter nicht auf als auf." + (f" {reason}" if reason else "")
+    if a == "bestätigt":
+        return True, reason
+    return None, reason or "nicht geprüft"
+
+
+def format_slip(rows: list[dict], checks: list[dict], book: str = "Sporttip") -> str:
+    """Antwort auf einen Screenshot: pro Tipp 🟢 geht auf / 🔴 geht nicht auf – mit Grund aus der Recherche."""
     name = book if book != "andere" else "Wett"
-    lines = [f"{'🟢' if book == 'Bet365' else '🇨🇭'} <b>{name}-Schein geprüft</b>"]
-    fair_total, st_total, complete, value = 1.0, 1.0, True, []
-    for r in rows:
+    lines = [f"🕵️ <b>{name}-Schein geprüft</b>"]
+    reds, greens, open_ = 0, 0, 0
+    for r, c in zip(rows, checks):
         leg = r["leg"]
-        mark = ("🚀 " if leg.boosted else "") + ("🧩 " if len(leg.parts) > 1 else "")
-        if r["fair"] is None:
-            complete = False
-            lines.append(f"❔ {mark}<b>{r['match']}</b> · {tip(leg.market_text)} @ {leg.odds:.2f} – nicht berechenbar")
-            continue
-        fair_total *= r["fair"]
-        st_total *= leg.odds
-        edge = leg.odds / r["fair"] - 1
-        icon = "💎" if edge >= 0.02 else "✅" if edge >= 0 else "⚠️" if edge >= -0.05 else "❌"
-        if edge >= 0.02:
-            value.append((edge, r))
-        lines.append(f"{icon} {mark}<b>{r['match']}</b> · {tip(leg.market_text)}: {name} <b>{leg.odds:.2f}</b> / "
-                     f"fair {r['fair']:.2f} (<b>{edge:+.0%}</b>) · Chance {r['prob']:.0%}")
-    priced = [r for r in rows if r["fair"]]
-    if value:
-        lines.append(f"\n💎 <b>VALUE gefunden</b> – hier zahlt {name} mehr als fair:")
-        for edge, r in sorted(value, key=lambda x: -x[0])[:5]:
-            lines.append(f"  • <b>{r['match']}</b> · {tip(r['leg'].market_text)} @ {r['leg'].odds:.2f} ({edge:+.0%})")
-        lines.append("  <i>Am besten einzeln spielen, kleiner Einsatz (1–2 % der Wettkasse).</i>")
-    if len(priced) > 1 and complete and total_odds:
-        v = total_odds / fair_total - 1
-        verdict = ("✅ <b>Gute Quote</b> – spielbar." if v >= 0 else
-                   "⚠️ Knapp unter fair – wenn, dann nur kleiner Einsatz." if v >= -0.05 else
-                   f"❌ <b>Zu tief</b> – {name} zahlt zu wenig; Wetten mit ❌ weglassen.")
-        lines.append(f"\nWettschein: {name} <b>{total_odds:.2f}</b> · fair {fair_total:.2f} → <b>{v:+.1%}</b>\n"
-                     f"{verdict}\nTrefferchance gesamt {1 / fair_total:.0%}")
-    elif not value and priced:
-        lines.append(f"\nKein Value auf diesem Bild – {name} zahlt überall weniger als fair.")
-    if learned:
-        lines.append(f"\n📚 {learned} {name}-Quote(n) gelernt – damit schätze ich {name}-Quoten in den Tipps.")
+        ok, reason = verdict(r, c)
+        icon = "🟢" if ok else "🔴" if ok is False else "⚪"
+        reds += ok is False
+        greens += ok is True
+        open_ += ok is None
+        chance = f" · {r['prob']:.0%}" if r.get("prob") else ""
+        lines.append(f"\n{icon} <b>{r['match']}</b>\n{tip(leg.market_text)}{chance}"
+                     + (f"\n<i>{html.escape(reason)}</i>" if reason else ""))
+    total = len(rows)
+    if reds:
+        lines.append(f"\n🔴 <b>{reds} von {total} Tipps rot</b> – diese weglassen.")
+    elif open_:
+        lines.append(f"\n⚪ {open_} Tipp(s) konnten nicht geprüft werden, der Rest ist 🟢.")
+    else:
+        lines.append(f"\n🟢 <b>Alle {total} Tipps grün</b> – laut Recherche passt der Schein.")
     return "\n".join(lines)
 
 
@@ -297,43 +293,31 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
                 out.append(f"━━━━━━━━━━━━━━━\n<b>{CATEGORIES[cat]}</b>")
                 shown_cat = cat
             d = _fmt_day(c["legs"][0]["kickoff"])
-            icon = {"bestätigt": " ✅", "vorsicht": " ⚠️", "streichen": " ❌"}
+            icon = {"bestätigt": " 🟢", "vorsicht": " 🔴", "streichen": " 🔴"}
             legs = "\n".join(f"  {i}. <b>{state.local(l['kickoff']).strftime('%H:%M')} {l['match']}</b>"
                               f" <i>({l.get('comp_name') or l.get('comp', '')})</i>\n"
                               f"     {'🧩' if l.get('market') == 'BB' else '➡️'} {tip(l['label'])} <b>({l['prob']:.0%})</b>"
                               f"{icon.get((l.get('agent') or {}).get('assessment'), '')}"
                               + (f"\n     <i>🔄 vom Scout gewählt statt „{l['switched_from']}“</i>"
                                  if l.get("switched_from") else "")
-                              + f"\n     {_leg_odds(l)}"
-                              + (f"\n     <i>⚠️ {l['agent']['reason']}</i>"
+                              + (f"\n     <i>🔴 {html.escape(l['agent']['reason'])}</i>"
                                  if (l.get("agent") or {}).get("assessment") == "vorsicht" else "")
                               for i, l in enumerate(c["legs"], 1))
-            live = (f"Live-Gesamtquote (beste Buchmacher): <b>{c['book_odds']:.2f}</b>"
-                    f"{_odds_time(c['legs'])}\n" if c.get("book_odds") else "")
-            est = sporttip_estimate(c)
-            if est is not None:
-                live += (f"Sporttip geschätzt (aus deinen Screenshots): <b>{est:.2f}</b> "
-                         f"{'✅' if est >= c['fair_odds'] else '❌ unter fair'}\n")
             wide = ("\n<i>Heute gibt es nicht genug Spiele im Bereich 75–88 %, darum etwas "
                     "breiter gewählt.</i>" if c.get("widened") else "")
             if c.get("krass"):
-                head = f"🔥 <b>{c['id']} · Krass-Kombi {d}</b> ({c['size']} BetBuilder, Quote ca. {c['fair_odds']:.0f})"
+                head = f"🔥 <b>{c['id']} · Krass-Kombi {d}</b> ({c['size']} BetBuilder)"
                 bt, pct = KRASS_BT, STAKE_PCT["krass"]
             elif c.get("risky"):
-                head = (f"🎲 <b>{c['id']} · Risiko-Kombi {d}</b> ({c['size']} BetBuilder, Quote ca. "
-                        f"{c['fair_odds']:.1f})" if c.get("builder") else
-                        f"🎲 <b>{c['id']} · Risiko-Kombi {d}</b> ({c['size']} Spiele, höhere Quote)")
+                head = f"🎲 <b>{c['id']} · Risiko-Kombi {d}</b> ({c['size']} {'BetBuilder' if c.get('builder') else 'Spiele'})"
                 bt, pct = RISKY_BT, STAKE_PCT["risky"]
             else:
                 head = f"🎯 <b>{c['id']} · {c['size']}er-Tageskombi {d}</b>"
                 bt = f"Backtest {c['size']}er: {DAY_BT.get(str(c['size']), '')}"
                 pct = STAKE_PCT.get(str(c["size"]), 1.0)
-            bt += f"\n💰 Einsatz: höchstens {pct:g} % deiner Wettkasse (bei 200 CHF = {2 * pct:.2f} CHF)"
+            bt += f"\n💰 Einsatz: höchstens {pct:g} % deiner Wettkasse"
             out.append(f"{head}\n{legs}\n"
-                       f"Trefferchance gesamt <b>{c['prob']:.0%}</b> · faire Gesamtquote <b>{c['fair_odds']:.2f}</b>\n"
-                       f"{live}"
-                       f"Nur spielen, wenn Sporttip ≥ <b>{c['fair_odds']:.2f}</b> zahlt. "
-                       f"Prüfen: /sporttip {c['id']} Quote1 Quote2 …\n"
+                       f"Chance gesamt <b>{c['prob']:.0%}</b> · Quote ca. <b>{c['fair_odds']:.2f}</b>\n"
                        f"<i>{bt}</i>{wide}")
     return "\n\n".join(out)
 
@@ -449,7 +433,6 @@ COMMANDS = [
     ("tageskombi", "3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("risiko", "Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8"),
     ("krass", "Krass-Kombi: 3 BetBuilder, Quote ca. 8–25"),
-    ("sporttip", "Sporttip-Quoten prüfen: /sporttip T1 1.30 1.25 …"),
     ("kosten", "Claude-Kosten heute"),
     ("sicher", "Tipps mit hoher Trefferquote"),
     ("heute", "Top-Tipps von heute (wie /top5)"),
@@ -497,8 +480,7 @@ def build(engine) -> Application | None:
                             "/tageskombi – 3er- und 5er-Kombi, alle Spiele am selben Tag\n"
                             "/risiko – Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8\n"
                             "/krass – Krass-Kombi: 3 BetBuilder, Quote ca. 8–25\n"
-                            "/sporttip T1 Quoten – Sporttip-Quoten prüfen\n"
-                            "📸 Screenshot vom Sporttip-Schein schicken – ich prüfe die Quoten\n"
+                            "📸 Screenshot vom Wettschein schicken – die Agenten prüfen jeden Tipp: 🟢 geht auf / 🔴 nicht\n"
                             "/sicher – Tipps mit hoher Trefferquote (Über/Unter, 1X …)\n"
                             "/kosten – Claude-Kosten heute\n/bilanz – Bilanz\n/gesetzt Nr Einsatz Quote – Wette erfassen (z. B. /gesetzt S3 10 1.45)\n"
                             "/update – neu berechnen")
@@ -608,7 +590,7 @@ def build(engine) -> Application | None:
         else:
             tg_file, media = await msg.document.get_file(), msg.document.mime_type or "image/jpeg"
         image = bytes(await tg_file.download_as_bytearray())
-        await reply(update, "🔍 Lese den Sporttip-Schein … (ca. 20 Sekunden)")
+        await reply(update, "🔍 Lese den Schein, dann recherchieren die Agenten jedes Spiel … (1–3 Minuten)")
 
         def work():
             forecasts = service.market_forecasts(engine, hours=96)
@@ -622,10 +604,14 @@ def build(engine) -> Application | None:
             runner.add_other_cost(engine, cost)
             rows = slip.evaluate(data, forecasts)
             book = data.bookmaker if data.bookmaker != "andere" else "Sporttip"
-            return data, rows, slip.remember(engine, rows, book)
+            slip.remember(engine, rows, book)
+            items = [{"match_id": r.get("match_id"), "match": r["match"], "kickoff": r.get("kickoff"),
+                      "comp": r.get("comp", ""), "label": r["leg"].market_text} for r in rows]
+            checks = runner.check_tips(engine, items, client=client, local_time=state.local)
+            return data, rows, checks
 
         try:
-            data, rows, learned = await asyncio.get_running_loop().run_in_executor(None, work)
+            data, rows, checks = await asyncio.get_running_loop().run_in_executor(None, work)
         except Exception as exc:  # noqa: BLE001
             log.exception("Screenshot fehlgeschlagen")
             if "credit balance" in str(exc):
@@ -638,7 +624,7 @@ def build(engine) -> Application | None:
             await reply(update, "Auf dem Bild habe ich keine Wetten mit Quoten gefunden. Bitte den Sporttip-Schein "
                                 "oder die Spielliste mit Quoten fotografieren.")
             return
-        await reply(update, format_slip(rows, data.total_odds, learned, data.bookmaker))
+        await reply(update, format_slip(rows, checks, data.bookmaker))
 
     async def cmd_update(update: Update, _ctx):
         await reply(update, "⟳ Aktualisiere Daten und Prognosen …")

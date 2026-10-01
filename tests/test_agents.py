@@ -238,3 +238,17 @@ def test_daily_cost_survives_restart_via_pin(engine, tmp_path, monkeypatch):
     runner.restore_carryover(fresh, runner.parse_pin(text))  # doppelt einlesen zählt nicht doppelt
     assert runner.spent_today(fresh) == pytest.approx(0.9)
     assert runner.parse_pin("📌 Claude-Kosten (UTC 2020-01-01): 1.20 $ von 1.50 $ Tageslimit") is None
+
+
+def test_check_tips_reuses_research_cheaply(engine, fixture_bytes, bundesliga, monkeypatch):
+    monkeypatch.setattr(runner, "fatigue_context", lambda e, mid: "ctx")
+    plan = _plan_with_matches(engine, fixture_bytes, bundesliga)
+    leg = plan.day_combos[0]["legs"][0]
+    item = {k: leg[k] for k in ("match_id", "match", "kickoff", "comp")} | {"label": "Über 2.5 Tore"}
+    client = FakeClient({leg["match"]: "streichen"})
+    first = runner.check_tips(engine, [item], client=client)
+    assert first[0]["assessment"] == "streichen" and client.calls == 1  # volle Recherche (Websuche)
+    second = runner.check_tips(engine, [item, {**item, "match_id": None}], client=client)
+    assert client.calls == 1  # zweites Mal: keine neue Websuche, nur Bewertung der gespeicherten Fakten
+    assert second[0]["assessment"] == "streichen" and second[1]["assessment"] is None
+    assert runner.other_costs_today(engine)["n"] == 1

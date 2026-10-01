@@ -186,3 +186,39 @@ def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float
                     "reason": res.intel.tip_reason, "best_tip": res.intel.best_tip, "cost": res.cost_usd,
                     "text": scout.format_intel(leg["match"], leg["label"], res.intel), "cached": False})
     return out
+
+
+def check_tips(engine: Engine, items: list[dict], client=None, local_time=None, max_age_h: float = 10.0) -> list[dict]:
+    """Für Tipps von einem Wettschein: Scout-Urteil pro Tipp.
+    `items`: {match_id, match, kickoff, comp, label}. Ist das Spiel heute schon recherchiert, wird nur der Tipp
+    anhand der gespeicherten Fakten bewertet (ca. 1–2 Rappen); sonst volle Recherche (ca. 0.25 $), solange das
+    Tageslimit reicht. Ergebnis pro Tipp: {assessment, reason} (assessment None = nicht geprüft)."""
+    client = client or scout.make_client()
+    out = []
+    for it in items:
+        res = {"assessment": None, "reason": ""}
+        if client is None or it.get("match_id") is None:
+            res["reason"] = "Spiel nicht in unseren Daten – keine Recherche möglich"
+            out.append(res)
+            continue
+        try:
+            cached = recent_report(engine, it["match_id"], max_age_h)
+            if cached is not None:
+                if spent_today(engine) + 0.05 > daily_budget():
+                    res["reason"] = "Tageslimit erreicht – morgen wieder"
+                else:
+                    intel = scout.MatchIntel.model_validate(cached.data)
+                    j, cost = scout.judge_tip(client, intel, it["match"], it["label"])
+                    add_other_cost(engine, cost)
+                    res.update(assessment=j.tip_assessment, reason=j.tip_reason)
+            else:
+                r = analyze_legs(engine, [it], client=client, local_time=local_time, max_age_h=max_age_h)
+                if r:
+                    res.update(assessment=r[0]["assessment"], reason=r[0]["reason"])
+                else:
+                    res["reason"] = "Tageslimit erreicht – morgen wieder"
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Tipp-Prüfung fehlgeschlagen")
+            res["reason"] = f"Prüfung fehlgeschlagen ({type(exc).__name__})"
+        out.append(res)
+    return out

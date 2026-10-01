@@ -139,7 +139,8 @@ def evaluate(slip: Slip, forecasts) -> list[dict]:
             or _find_forecast(forecasts, leg.home, leg.away)
         parts = to_parts(leg)
         if f is not None:
-            row["match"] = f"{f.home} – {f.away}"
+            row.update(match=f"{f.home} – {f.away}", match_id=f.match_id, kickoff=f.kickoff_utc.isoformat(),
+                       comp=f.comp_name or f.comp)
             if parts and f.implied_rates:
                 p = joint_prob(*f.implied_rates, parts)
                 if p > 0.001:
@@ -154,7 +155,7 @@ def remember(engine: Engine, rows: list[dict], book: str = "Sporttip") -> int:
     # Boosts nicht lernen: sie sind absichtlich erhöht und verfälschen die normale Marge des Anbieters
     new = [{"match_id": r["match_id"], "key": r["key"], "sel": "+".join(p.selection for p in r["leg"].parts),
             "odds": r["leg"].odds, "fair": r["fair"], "at": utcnow().isoformat(), "book": book}
-           for r in rows if r.get("ratio") and not r["leg"].boosted]
+           for r in rows if r.get("ratio") and r.get("key") and not r["leg"].boosted]
     with session_scope(engine) as s:
         row = s.get(AppSetting, OBS_KEY)
         obs = list(row.value) if row and isinstance(row.value, list) else []

@@ -186,6 +186,27 @@ def scout_match(client, match: str, kickoff_local: str, competition: str, tip: s
     return ScoutResult(intel, c1 + c2, searches, model)
 
 
+class TipJudgement(BaseModel):
+    tip_assessment: Literal["bestätigt", "vorsicht", "streichen"]
+    tip_reason: str = Field(description="1 kurzer Satz auf Deutsch: warum der Tipp aufgeht oder nicht")
+
+
+def judge_tip(client, intel: MatchIntel, match: str, tip: str, model: str = MODEL) -> tuple[TipJudgement, float]:
+    """Einen weiteren Tipp für ein schon recherchiertes Spiel bewerten – ohne neue Websuche (günstig)."""
+    resp = client.beta.messages.parse(
+        model=model, max_tokens=2000, output_format=TipJudgement, output_config={"effort": "low"},
+        betas=[FALLBACK_BETA], fallbacks="default",
+        messages=[{"role": "user", "content":
+                   f"Spiel: {match}\nZu bewertender Tipp: {tip}\n\nRecherchierte Fakten (JSON):\n"
+                   f"{intel.model_dump_json()}\n\nBewerte den Tipp nur anhand dieser Fakten: bestätigt, vorsicht "
+                   "oder streichen, mit einem kurzen Grund (Ausfälle, Torhüter, Form, Müdigkeit, Aufstellung). "
+                   "Keine Quoten, keine Wahrscheinlichkeiten."}],
+    )
+    if resp.stop_reason == "refusal" or resp.parsed_output is None:
+        raise RuntimeError("Bewertung fehlgeschlagen")
+    return resp.parsed_output, _cost(model, resp.usage, 0)
+
+
 def make_client():
     """Anthropic-Client oder None, wenn keine Zugangsdaten konfiguriert sind."""
     if not (os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")):

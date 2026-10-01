@@ -56,15 +56,12 @@ def test_sporttip_check_per_leg_and_total():
     assert "nicht gefunden" in telegram_bot.check_sporttip(plan, "T9", [2.0])
 
 
-def test_day_combo_shows_min_and_live_odds():
+def test_day_combo_only_tips_no_fair_talk():
     plan = _combo()
-    for l in plan["day_combos"][0]["legs"]:
-        l.update(book_odds=1.33, book="Bet365", ps_odds=1.27, odds_at="2026-10-10T08:00:00")
-    plan["day_combos"][0]["book_odds"] = 1.33 ** 5
+    plan["day_combos"][0]["legs"][0]["agent"] = {"assessment": "vorsicht", "reason": "Torjäger fällt aus"}
     text = telegram_bot.format_day_combos(plan)
-    assert "Sporttip mind. <b>1.25</b>" in text and "live 1.33 (Bet365)" in text
-    assert "Live-Gesamtquote" in text and "/sporttip T1" in text
-
+    assert "Chance gesamt" in text and "🔴" in text and "Torjäger fällt aus" in text
+    assert "fair" not in text and "Sporttip mind." not in text
 
 def test_today_without_combo_lists_remaining_games():
     from datetime import datetime, timedelta

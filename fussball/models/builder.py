@@ -109,7 +109,7 @@ def part_label(p: Part, home: str, away: str) -> str:
 CANDIDATES = [Part("1X2", "H"), Part("1X2", "A"), Part("DC", "1X"), Part("DC", "X2"),
               Part("OU", "O", 1.5), Part("OU", "O", 2.5), Part("OU", "U", 2.5), Part("OU", "U", 3.5),
               Part("BTTS", "Y"), Part("BTTS", "N"),
-              Part("HOME", "O", 0.5), Part("HOME", "O", 1.5), Part("AWAY", "O", 0.5), Part("AWAY", "O", 1.5)]
+              Part("HOME", "O", 1.5), Part("AWAY", "O", 1.5)]  # keine 0.5-Linien (Quote zu tief)
 FAMILY = {"1X2": "result", "DC": "result", "OU": "total", "BTTS": "btts", "HOME": "home", "AWAY": "away"}
 
 
@@ -149,3 +149,14 @@ def best_builders(lam: float, mu: float, min_prob: float = 0.40, max_prob: float
             out.append(Builder(list(combo), joint, float(np.prod([single[p] for p in combo]))))
     out.sort(key=lambda b: (-(b.lift * b.prob), -b.prob))
     return out[:top]
+
+
+def halftime_markets(lam: float, mu: float) -> dict[str, dict[str, float]]:
+    """Märkte der 1. Halbzeit (wie bei Sporttip/Bet365). Im Backtest (6000 Spiele seit 2022) gut
+    kalibriert: 1. HZ doppelte Chance, Über 0.5 / Unter 1.5 Tore, beide treffen."""
+    out: dict[str, dict[str, float]] = {}
+    for key, market, sels, line in (("H1_1X2", "1X2", ("H", "D", "A"), 0.0), ("H1_DC", "DC", ("1X", "X2", "12"), 0.0),
+                                    ("H1_OU0.5", "OU", ("O", "U"), 0.5), ("H1_OU1.5", "OU", ("O", "U"), 1.5),
+                                    ("H1_BTTS", "BTTS", ("Y", "N"), 0.0)):
+        out[key] = {sel: joint_prob(lam, mu, [Part(market, sel, line, "1h")]) for sel in sels}
+    return out

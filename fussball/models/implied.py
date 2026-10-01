@@ -63,6 +63,8 @@ def implied_markets(lam: float, mu: float, rho: float = RHO) -> dict[str, dict[s
 
 # Anzeige-Texte wie auf dem Wettschein (Sporttip-Stil)
 def label(market: str, sel: str, home: str, away: str) -> str:
+    if market.startswith("H1_"):  # 1. Halbzeit
+        return "1. Halbzeit: " + label(market[3:], sel, home, away)
     if market == "1X2":
         return {"H": f"1 (Sieg {home})", "D": "X (Unentschieden)", "A": f"2 (Sieg {away})"}[sel]
     if market == "DC":
@@ -84,7 +86,10 @@ def label(market: str, sel: str, home: str, away: str) -> str:
 
 
 def outcome(market: str, sel: str, hg: int, ag: int) -> bool | None:
-    """Hat der Tipp gewonnen? None = zurück (Draw No Bet bei Unentschieden)."""
+    """Hat der Tipp gewonnen? None = zurück (Draw No Bet bei Unentschieden) oder nicht auswertbar
+    (Halbzeit-Tipps: die Ergebnis-Quelle liefert nur den Endstand)."""
+    if market.startswith("H1_"):
+        return None
     total = hg + ag
     if market == "1X2":
         return {"H": hg > ag, "D": hg == ag, "A": hg < ag}[sel]

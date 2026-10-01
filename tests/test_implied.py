@@ -123,11 +123,13 @@ def test_combo_varies_tips_and_offers_team_goals():
 
     fs = [MatchForecast(i, "D1", "BL", datetime(2026, 10, 10, 12 + i, 0), f"H{i}", f"A{i}", 1.5, 1.0, {}, {}, {},
                         None, None, 0.0, {}, implied={"OU1.5": {"O": 0.85, "U": 0.15},
-                                                      "HOME0.5": {"O": 0.80, "U": 0.20}}) for i in range(5)]
+                                                      "HOME1.5": {"O": 0.80, "U": 0.20},
+                                                      "HOME0.5": {"O": 0.95, "U": 0.05}}) for i in range(5)]
     legs = day_combos(fs, sizes=(5,))[0]["legs"]
     labels = [l["label"] for l in legs]
     # höchstens 2× derselbe Tipp; erst wenn es nicht anders geht (nur 2 Tipp-Arten), wird aufgefüllt
-    assert sum("trifft" in x for x in labels) == 2 and labels.count("Über 1.5 Tore") == 3
+    assert sum("über 1.5 Tore (Team)" in x for x in labels) == 2 and labels.count("Über 1.5 Tore") == 3
+    assert not any("0.5" in x for x in labels)  # keine 0.5-Tipps
 
 
 def test_krass_combo_high_odds():
@@ -160,3 +162,16 @@ def test_categories_never_mixed():
     assert {c["cat"] for c in combos} == {"national", "frauen"}
     for c in combos:
         assert len({category(l["comp"], l["comp_name"]) for l in c["legs"]}) == 1  # nie gemischt
+
+
+def test_halftime_tips_available_and_calibrated_markets_only():
+    from fussball.models.builder import halftime_markets
+    from fussball.service import COMBO_MARKETS, best_tip_per_match
+
+    ht = halftime_markets(1.2, 1.0)
+    assert abs(sum(ht["H1_1X2"].values()) - 1) < 1e-6 and ht["H1_DC"]["1X"] > ht["H1_1X2"]["H"]
+    assert "HCP" not in " ".join(COMBO_MARKETS) and not any(m.endswith("0.5") for m in COMBO_MARKETS)
+    f = MatchForecast(1, "D1", "BL", datetime(2026, 10, 10, 18, 0), "H", "A", 1.2, 1.0, {}, {}, {}, None, None, 0.0, {},
+                      implied={"H1_DC": {"1X": 0.80, "X2": 0.70, "12": 0.5}, "OU2.5": {"O": 0.5, "U": 0.5}})
+    tip = best_tip_per_match([f], 0.75, 0.88)[0]
+    assert tip["market"] == "H1_DC" and tip["label"].startswith("1. Halbzeit: 1X")

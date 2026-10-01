@@ -80,10 +80,13 @@ def top_tips(plan: dict, n: int = 5, day: str | None = None) -> dict[str, list[d
             continue
         if t["prob"] > best.get(t["match_id"], {}).get("prob", 0):
             best[t["match_id"]] = {**t, "agent": agent.get(t["match_id"])}
+    from fussball.service import _varied
+
     by_cat: dict[str, list[dict]] = {}
     for t in sorted(best.values(), key=lambda t: -t["prob"]):
         by_cat.setdefault(category(t["comp"], t.get("comp_name")), []).append(t)
-    return {c: sorted(ts[:n], key=lambda t: t["kickoff"]) for c, ts in by_cat.items()}
+    # höchstens 2× derselbe Tipp – sonst nächstbester Tipp desselben Spiels
+    return {c: sorted(_varied(ts, n), key=lambda t: t["kickoff"]) for c, ts in by_cat.items()}
 
 
 def format_top5(plan: dict, n: int = 5) -> str:

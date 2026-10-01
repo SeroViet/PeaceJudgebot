@@ -343,6 +343,7 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
 def market_forecasts(engine: Engine, hours: float = 72.0, now: datetime | None = None) -> list[MatchForecast]:
     """Prognosen allein aus Pinnacle-Quoten – für jeden Wettbewerb weltweit, ohne Historie."""
     from fussball.data.schema import Competition, Odds
+    from fussball.models.builder import halftime_markets
     from fussball.models.implied import fit_rates, implied_markets
 
     now = now or utcnow()
@@ -364,7 +365,7 @@ def market_forecasts(engine: Engine, hours: float = 72.0, now: datetime | None =
             tot = pinnacle_total(s, m.id)
             lam, mu = fit_rates(p1, *(tot if tot else (None, None)))
             home, away = s.get(Team, m.home_team_id).name, s.get(Team, m.away_team_id).name
-            implied = implied_markets(lam, mu)
+            implied = {**implied_markets(lam, mu), **halftime_markets(lam, mu)}
             out.append(MatchForecast(m.id, code, cname, m.kickoff_utc, home, away, lam, mu, p1,
                                      implied["OU2.5"], p1, p1, None, 0.0, {}, league_ok=True, mode="markt",
                                      reference="PS", implied=implied, implied_rates=(lam, mu)))
@@ -391,6 +392,7 @@ def pinnacle_total(session, match_id: int) -> tuple[float, float] | None:
 
 def _add_implied(engine: Engine, forecasts: list[MatchForecast]) -> None:
     """Alle Märkte aus Pinnacle ableiten (nur wenn Pinnacle-1X2 vorliegt)."""
+    from fussball.models.builder import halftime_markets
     from fussball.models.implied import fit_rates, implied_markets
 
     with session_scope(engine) as s:
@@ -400,7 +402,7 @@ def _add_implied(engine: Engine, forecasts: list[MatchForecast]) -> None:
             tot = pinnacle_total(s, f.match_id)
             lam, mu = fit_rates(f.market_1x2, *(tot if tot else (None, None)))
             f.implied_rates = (lam, mu)
-            f.implied = implied_markets(lam, mu)
+            f.implied = {**implied_markets(lam, mu), **halftime_markets(lam, mu)}
 
 
 SAFE_FAMILIES = {"1X2": "sieg", "DC": "sieg", "DNB": "sieg", "BTTS": "btts"}
@@ -460,9 +462,12 @@ def category(comp: str, comp_name: str | None = None) -> str:
 
 # Teamtore ("Bayern trifft", "Bayern über 1.5 Tore") sind im Backtest im Bereich 70–88 % genauso gut
 # kalibriert wie Über/Unter gesamt und bringen Abwechslung in die Kombi.
-COMBO_MARKETS = ("1X2", "DC", "OU1.5", "OU2.5", "OU3.5", "BTTS", "HOME0.5", "AWAY0.5", "HOME1.5", "AWAY1.5")
+# Keine 0.5-Linien ("Team trifft", "1. HZ über 0.5"): Quote zu tief, bringt nichts.
+COMBO_MARKETS = ("1X2", "DC", "OU1.5", "OU2.5", "OU3.5", "BTTS", "HOME1.5", "AWAY1.5",
+                 "H1_DC", "H1_OU1.5")  # 1. Halbzeit: im Backtest kalibriert (Handicap nicht → fehlt)
 # Keine Tipps wie "12 (kein Unentschieden)", "X" oder "Team unter …": wenig aussagekräftig
-EXCLUDED_TIPS = {("DC", "12"), ("1X2", "D"), ("HOME0.5", "U"), ("AWAY0.5", "U"), ("HOME1.5", "U"), ("AWAY1.5", "U")}
+EXCLUDED_TIPS = {("DC", "12"), ("1X2", "D"), ("HOME0.5", "U"), ("AWAY0.5", "U"), ("HOME1.5", "U"), ("AWAY1.5", "U"),
+                 ("H1_DC", "12"), ("H1_OU0.5", "U"), ("H1_OU1.5", "O")}
 MAX_SAME_TIP = 2  # höchstens 2× derselbe Tipp (z. B. "Über 1.5 Tore") pro Kombi
 # Tore-Tipps (Über/Unter, beide treffen) werden bevorzugt, solange sie nur wenig unsicherer sind
 GOAL_BONUS = 0.04
@@ -934,8 +939,7 @@ def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | N
     days_ = day_combos(all_fc, tuple(dc.get("sizes", [3, 5])), dc.get("min_prob", 0.75), dc.get("max_prob", 0.88))
     plan = DailyPlan(forecasts, singles, combos, cfg, blocked, safe, days_)
     plan.all_forecasts = all_fc
-    plan.top = [{k: v for k, v in t.items() if k != "alternatives"}
-                for t in best_tip_per_match(all_fc, 0.72, 0.90)]
+    plan.top = best_tip_per_match(all_fc, 0.75, 0.90)
     return plan
 
 

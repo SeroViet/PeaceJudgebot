@@ -170,7 +170,8 @@ def test_halftime_tips_available_and_calibrated_markets_only():
 
     ht = halftime_markets(1.2, 1.0)
     assert abs(sum(ht["H1_1X2"].values()) - 1) < 1e-6 and ht["H1_DC"]["1X"] > ht["H1_1X2"]["H"]
-    assert "HCP" not in " ".join(COMBO_MARKETS) and not any(m.endswith("0.5") for m in COMBO_MARKETS)
+    assert "HCP" not in " ".join(COMBO_MARKETS) and "H1_OU0.5" in COMBO_MARKETS
+    assert not any(m.endswith("0.5") and not m.startswith("H1_") for m in COMBO_MARKETS)  # ganzes Spiel: kein 0.5
     f = MatchForecast(1, "D1", "BL", datetime(2026, 10, 10, 18, 0), "H", "A", 1.2, 1.0, {}, {}, {}, None, None, 0.0, {},
                       implied={"H1_DC": {"1X": 0.80, "X2": 0.70, "12": 0.5}, "OU2.5": {"O": 0.5, "U": 0.5}})
     tip = best_tip_per_match([f], 0.75, 0.88)[0]

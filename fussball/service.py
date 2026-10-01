@@ -462,9 +462,10 @@ def category(comp: str, comp_name: str | None = None) -> str:
 
 # Teamtore ("Bayern trifft", "Bayern über 1.5 Tore") sind im Backtest im Bereich 70–88 % genauso gut
 # kalibriert wie Über/Unter gesamt und bringen Abwechslung in die Kombi.
-# Keine 0.5-Linien ("Team trifft", "1. HZ über 0.5"): Quote zu tief, bringt nichts.
+# Keine 0.5-Linien fürs ganze Spiel ("Team trifft", "Über 0.5"): Quote zu tief, bringt nichts.
+# 1. Halbzeit (inkl. "1. HZ über 0.5") bleibt: im Backtest kalibriert (Handicap nicht → fehlt).
 COMBO_MARKETS = ("1X2", "DC", "OU1.5", "OU2.5", "OU3.5", "BTTS", "HOME1.5", "AWAY1.5",
-                 "H1_DC", "H1_OU1.5")  # 1. Halbzeit: im Backtest kalibriert (Handicap nicht → fehlt)
+                 "H1_DC", "H1_OU0.5", "H1_OU1.5")
 # Keine Tipps wie "12 (kein Unentschieden)", "X" oder "Team unter …": wenig aussagekräftig
 EXCLUDED_TIPS = {("DC", "12"), ("1X2", "D"), ("HOME0.5", "U"), ("AWAY0.5", "U"), ("HOME1.5", "U"), ("AWAY1.5", "U"),
                  ("H1_DC", "12"), ("H1_OU0.5", "U"), ("H1_OU1.5", "O")}

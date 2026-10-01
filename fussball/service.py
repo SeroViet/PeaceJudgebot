@@ -599,17 +599,70 @@ def risky_combos(forecasts: list[MatchForecast], safe_combos: list[dict], size: 
     return out
 
 
+def builder_legs(forecasts: list[MatchForecast], min_prob: float, max_prob: float,
+                 skip: set[int] | None = None) -> list[dict]:
+    """Pro Spiel der schlaueste BetBuilder (2–3 Tipps, die sich verstärken) als Leg."""
+    from fussball.models.builder import best_builders, part_label
+
+    out = []
+    for f in forecasts:
+        if f.match_id in (skip or set()) or not f.implied_rates:
+            continue
+        lam, mu = f.implied_rates
+        found = best_builders(lam, mu, min_prob, max_prob)
+        if not found:
+            continue
+        legs = []
+        for b in found:
+            labels = [part_label(p, f.home, f.away) for p in b.parts]
+            legs.append({"market": "BB", "selection": "BB", "label": " + ".join(labels), "prob": b.prob,
+                         "fair_odds": b.fair_odds, "naive_odds": 1 / b.naive, "lift": b.lift,
+                         "parts": [[p.market, p.selection, p.line, p.half] for p in b.parts]})
+        best = legs[0]
+        out.append({"match_id": f.match_id, "match": f"{f.home} – {f.away}", "kickoff": f.kickoff_utc.isoformat(),
+                    "comp": f.comp, "comp_name": f.comp_name, **best,
+                    "alternatives": [{k: v for k, v in x.items()} for x in legs]})
+    return out
+
+
+def builder_combos(forecasts: list[MatchForecast], used_combos: list[dict], n: int = 3, min_prob: float = 0.38,
+                   max_prob: float = 0.55, tz: str = "Europe/Zurich", skip: set[int] | None = None) -> list[dict]:
+    """Pro Tag eine Kombi aus `n` BetBuildern (je ein Spiel), möglichst andere Spiele als `used_combos`."""
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo(tz)
+    used: dict[str, set[int]] = {}
+    for c in used_combos:
+        used.setdefault(c["day"], set()).update(l["match_id"] for l in c["legs"])
+    by_day: dict[str, list[dict]] = {}
+    for t in builder_legs(forecasts, min_prob, max_prob, skip):
+        day = datetime.fromisoformat(t["kickoff"]).replace(tzinfo=ZoneInfo("UTC")).astimezone(zone).date().isoformat()
+        by_day.setdefault(day, []).append(t)
+    out = []
+    for day in sorted(by_day):
+        legs = sorted(by_day[day], key=lambda t: (t["match_id"] in used.get(day, set()), -t["lift"] * t["prob"]))
+        if len(legs) < n:
+            continue
+        chosen = sorted(legs[:n], key=lambda t: t["kickoff"])
+        prob = float(np.prod([t["prob"] for t in chosen]))
+        out.append({"day": day, "size": n, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
+                    "naive_odds": float(np.prod([t["naive_odds"] for t in chosen])),
+                    "leg_min": min(t["prob"] for t in chosen), "builder": True})
+    return out
+
+
 def build_extra_combos(plan: "DailyPlan", kind: str, skip: set[int] | None = None) -> list[dict]:
-    """Risiko- (kind='risky') oder Krass-Kombi (kind='krass') aus den Prognosen des Plans."""
+    """Risiko- (kind='risky', 2 BetBuilder) oder Krass-Kombi (kind='krass', 3 BetBuilder)."""
     pool = plan.all_forecasts or plan.forecasts
     if kind == "risky":
         rc = plan.config.get("risky_combo", {})
-        return risky_combos(pool, plan.day_combos, rc.get("size", 3), rc.get("min_prob", 0.60),
-                            rc.get("max_prob", 0.72), skip=skip)
+        return [{**c, "risky": True} for c in builder_combos(
+            pool, plan.day_combos, rc.get("builders", 2), rc.get("min_prob", 0.35), rc.get("max_prob", 0.50),
+            skip=skip)]
     kc = plan.config.get("krass_combo", {})
-    return [{**c, "krass": True} for c in risky_combos(
-        pool, plan.day_combos + plan.risky_combos, kc.get("size", 5), kc.get("min_prob", 0.55),
-        kc.get("max_prob", 0.70), skip=skip, markets=KRASS_MARKETS)]
+    return [{**c, "krass": True} for c in builder_combos(
+        pool, plan.day_combos + plan.risky_combos, kc.get("builders", 3), kc.get("min_prob", 0.33),
+        kc.get("max_prob", 0.50), skip=skip)]
 
 
 def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,

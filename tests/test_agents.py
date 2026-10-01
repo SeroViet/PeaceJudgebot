@@ -64,7 +64,8 @@ def _plan_with_matches(engine, fixture_bytes, league, n=7):
         lam, mu = fit_rates({"H": 0.62 - i * 0.01, "D": 0.22, "A": 0.16 + i * 0.01}, 2.5, 0.57)
         forecasts.append(service.MatchForecast(ids[i], "D1", "BL",
                                                kickoff + timedelta(minutes=30 * i), f"H{i}", f"A{i}", lam, mu,
-                                               {}, {}, {}, None, None, 0.0, {}, implied=implied_markets(lam, mu)))
+                                               {}, {}, {}, None, None, 0.0, {}, implied=implied_markets(lam, mu),
+                                               implied_rates=(lam, mu)))
     cfg = {"day_combo": {"sizes": [5], "min_prob": 0.75, "max_prob": 0.88}}
     plan = service.DailyPlan(forecasts, [], [], cfg, [], [], service.day_combos(forecasts, (5,)))
     return plan
@@ -168,10 +169,11 @@ def test_scout_checks_krass_combo_and_replaces_struck(engine, fixture_bytes, bun
     plan.krass_combos = service.build_extra_combos(plan, "krass")
     assert plan.krass_combos and plan.krass_combos[0]["krass"]
     struck = plan.krass_combos[0]["legs"][0]["match"]
+    assert plan.krass_combos[0]["builder"] and all(l["market"] == "BB" for l in plan.krass_combos[0]["legs"])
     res = service.apply_agents_risky(engine, plan, client=FakeClient({struck: "streichen"}), kind="krass")
-    assert len(res) == 5
+    assert len(res) == 3
     legs = plan.krass_combos[0]["legs"]
-    assert struck not in {l["match"] for l in legs} and len(legs) == 5 and plan.krass_combos[0]["krass"]
+    assert struck not in {l["match"] for l in legs} and len(legs) == 3 and plan.krass_combos[0]["krass"]
 
 
 def test_costs_include_screenshots_and_stop_below_limit(engine, fixture_bytes, bundesliga, monkeypatch):

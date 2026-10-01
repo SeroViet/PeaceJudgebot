@@ -34,17 +34,17 @@ day_combo:
   min_prob: 0.75
   max_prob: 0.88
 
-# Risiko-Kombi: höhere Quoten (Über/Unter 2.5, beide treffen, Sieg), andere Spiele als die Tageskombi
+# Risiko-Kombi: 2 BetBuilder (je 2–3 Tipps im selben Spiel, die sich verstärken) → Quote ca. 4–8
 risky_combo:
-  size: 3
-  min_prob: 0.60
-  max_prob: 0.72
+  builders: 2
+  min_prob: 0.35
+  max_prob: 0.50
 
-# Krass-Kombi: 5 Spiele mit 55–70 % → Quote ca. 8–12, geht etwa an 1 von 10 Tagen auf (Scout prüft mit)
+# Krass-Kombi: 3 BetBuilder mit je Quote ca. 2–3 → Gesamtquote ca. 8–25
 krass_combo:
-  size: 5
-  min_prob: 0.55
-  max_prob: 0.70
+  builders: 3
+  min_prob: 0.33
+  max_prob: 0.50
 
 combos:
   min_legs: 4

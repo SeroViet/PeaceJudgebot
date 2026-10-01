@@ -16,6 +16,7 @@ from sqlalchemy import Engine
 from fussball.agents.scout import FALLBACK_BETA, MODEL, _cost
 from fussball.data.db import session_scope
 from fussball.data.schema import AppSetting, utcnow
+from fussball.models.builder import Part, joint_prob
 
 log = logging.getLogger(__name__)
 OBS_KEY = "sporttip_obs"
@@ -23,17 +24,26 @@ MAX_OBS = 1000
 MIN_OBS = 3  # ab so vielen Beobachtungen pro Tipp-Art wird geschätzt
 
 
+class SlipPart(BaseModel):
+    market: Literal["1X2", "DC", "OU", "BTTS", "TEAM_OU", "HCP", "CS", "andere"] = Field(
+        description="1X2 = Sieg/Unentschieden · DC = doppelte Chance · OU = Über/Unter Tore gesamt · "
+                    "BTTS = beide Teams treffen · TEAM_OU = Über/Unter Tore eines Teams · HCP = Handicap (3-Weg) · "
+                    "CS = genaues Resultat · andere = alles andere (Torschützen, Ecken, Karten, Gerade/Ungerade …)")
+    selection: str = Field(description="1X2/HCP: H, D oder A · DC: 1X, X2 oder 12 · OU/TEAM_OU: O oder U · "
+                                       "BTTS: Y oder N · CS: z. B. '2:1' (Heim:Gast) · andere: leer")
+    line: float | None = Field(description="OU/TEAM_OU: Torlinie (2.5). HCP: Heim-Vorgabe minus Gast-Vorgabe "
+                                           "(Sporttip 'Handicap 0:1' → -1, '1:0' → 1, '0:2' → -2). Sonst null")
+    team: Literal["home", "away"] | None = Field(description="Nur bei TEAM_OU: welches Team")
+    half: Literal["ft", "1h"] = Field(description="ft = ganzes Spiel, 1h = nur 1. Halbzeit")
+
+
 class SlipLeg(BaseModel):
     home: str = Field(description="Heimteam wie auf dem Bild")
     away: str = Field(description="Gastteam wie auf dem Bild")
-    market_text: str = Field(description="Tipp-Text wie auf dem Bild, z. B. 'Total Tore Über 2.5' oder '1X'")
-    market: Literal["1X2", "DC", "OU", "BTTS", "andere"] = Field(
-        description="1X2 = Sieg/Unentschieden, DC = doppelte Chance, OU = Über/Unter Tore gesamt, "
-                    "BTTS = beide Teams treffen, andere = alles andere (Handicap, Halbzeit, Teamtore …)")
-    selection: str = Field(description="1X2: H, D oder A · DC: 1X, X2 oder 12 · OU: O oder U · BTTS: Y oder N · "
-                                       "andere: leer")
-    line: float | None = Field(description="Bei OU die Torlinie (z. B. 2.5), sonst null")
-    odds: float = Field(description="Quote dieses Tipps als Dezimalzahl")
+    market_text: str = Field(description="Tipp-Text wie auf dem Bild (bei BetBuilder alle Teile mit ' + ')")
+    parts: list[SlipPart] = Field(description="Ein Teil bei normaler Wette; bei BetBuilder alle Teil-Tipps")
+    odds: float = Field(description="Quote dieser Wette (bei BetBuilder die BetBuilder-Quote) als Dezimalzahl")
+    boosted: bool = Field(description="True, wenn die Quote als erhöht/Boost/Prämie markiert ist")
     match_id: int | None = Field(description="ID des passenden Spiels aus der mitgelieferten Liste "
                                              "(Teamnamen können auf Deutsch/Englisch abweichen), sonst null")
 
@@ -41,16 +51,18 @@ class SlipLeg(BaseModel):
 class Slip(BaseModel):
     is_betting_slip: bool = Field(description="True, wenn das Bild Sportwetten mit Quoten zeigt")
     legs: list[SlipLeg]
-    total_odds: float | None = Field(description="Gesamtquote der Kombi, falls angezeigt")
+    total_odds: float | None = Field(description="Gesamtquote der Kombi auf dem Wettschein, falls angezeigt")
 
 
-PROMPT = """Das Bild ist ein Screenshot von Sporttip (Schweizer Sportwetten) – ein Wettschein oder eine
-Spielliste mit Quoten. Lies jede Wette ab: Heimteam, Gastteam, Tipp und Quote. Ordne jeden Tipp einer
-Kategorie zu. Sporttip-Begriffe: "1"/"X"/"2" = Sieg Heim/Unentschieden/Sieg Gast; "1X", "X2", "12" =
-doppelte Chance; "Über/Unter x.5" bei Toren gesamt = OU; "Beide Teams treffen Ja/Nein" = BTTS.
-Handicap, Halbzeit, Teamtore, Ecken usw. = andere. Wenn eine Spielliste mehrere Quoten pro Spiel zeigt,
-nimm jede sichtbare Quote als eigene Wette. Schreibe Dezimalquoten mit Punkt. Erfinde nichts: was nicht
-lesbar ist, lässt du weg."""
+PROMPT = """Das Bild ist ein Screenshot von Sporttip (Schweizer Sportwetten): ein Wettschein, eine Spielseite
+mit Quoten, ein BetBuilder oder eine Prämie/Boost. Lies jede Wette ab: Heimteam, Gastteam, Tipp, Quote.
+Sporttip-Begriffe: "Endergebnis 1/X/2" = 1X2; "1X", "X2", "12" = DC; "Over/Under Tore" = OU;
+"Erzielen beide Teams ein Tor? Ja/Nein" = BTTS; "Team 1/2 Over/Under" = TEAM_OU; "Handicap 0:1" = HCP mit
+line -1; "Resultat 2:1" = CS; "1. Halbzeit - …" = gleicher Markt mit half 1h.
+Ein BetBuilder (mehrere Tipps im selben Spiel mit EINER Quote) ist EINE Wette mit mehreren parts.
+Zeigt eine Spielseite viele Quoten, nimm jede sichtbare Quote als eigene Wette (ein part). Markiere
+erhöhte Quoten (Boost, Prämie, durchgestrichene alte Quote) mit boosted. Dezimalquoten mit Punkt.
+Erfinde nichts: was nicht lesbar ist, lässt du weg."""
 
 
 def read_slip(client, image: bytes, media_type: str = "image/jpeg", matches: list[str] | None = None,
@@ -71,14 +83,37 @@ def read_slip(client, image: bytes, media_type: str = "image/jpeg", matches: lis
     return resp.parsed_output, _cost(model, resp.usage, 0)
 
 
-def market_key(leg: SlipLeg) -> str | None:
-    if leg.market == "OU":
-        return f"OU{leg.line}" if leg.line is not None else None
-    return None if leg.market == "andere" else leg.market
+def to_parts(leg: SlipLeg) -> list[Part] | None:
+    """Wette → Teile für den BetBuilder-Rechner; None, wenn ein Teil nicht berechenbar ist."""
+    out = []
+    for p in leg.parts:
+        if p.market == "andere":
+            return None
+        if p.market in ("OU", "TEAM_OU", "HCP") and p.line is None:
+            return None
+        market = ("HOME" if p.team != "away" else "AWAY") if p.market == "TEAM_OU" else p.market
+        out.append(Part(market, p.selection, float(p.line or 0.0), p.half))
+    return out or None
+
+
+def market_key(parts: list[Part]) -> str:
+    """Lernschlüssel: Einzelwette nach Markt (z. B. 'OU2.5', '1X2', '1h:OU1.5'), BetBuilder = 'BB'."""
+    if len(parts) > 1:
+        return "BB"
+    p = parts[0]
+    key = p.market + (f"{p.line:g}" if p.market in ("OU", "HOME", "AWAY", "HCP") else "")
+    return f"1h:{key}" if p.half == "1h" else key
 
 
 def family(key: str) -> str:
-    return "OU" if key.startswith("OU") else key
+    if key == "BB":
+        return "BB"
+    half = "1h:" if key.startswith("1h:") else ""
+    base = key.removeprefix("1h:")
+    for prefix in ("OU", "HOME", "AWAY", "HCP"):
+        if base.startswith(prefix):
+            return half + ("TEAM" if prefix in ("HOME", "AWAY") else prefix)
+    return half + base
 
 
 def _find_forecast(forecasts, home: str, away: str):
@@ -93,26 +128,31 @@ def _find_forecast(forecasts, home: str, away: str):
 
 
 def evaluate(slip: Slip, forecasts) -> list[dict]:
-    """Pro Wette: faire Wahrscheinlichkeit (Pinnacle-Markt) und Verhältnis Sporttip/fair."""
+    """Pro Wette: faire Wahrscheinlichkeit (exakt aus der Pinnacle-Torverteilung, auch BetBuilder,
+    Handicap und 1. Halbzeit) und Verhältnis Sporttip-Quote / faire Quote."""
     out = []
     for leg in slip.legs:
         row = {"leg": leg, "match": f"{leg.home} – {leg.away}", "fair": None, "ratio": None, "prob": None}
-        key = market_key(leg)
         f = next((f for f in forecasts if f.match_id == leg.match_id), None) \
             or _find_forecast(forecasts, leg.home, leg.away)
+        parts = to_parts(leg)
         if f is not None:
             row["match"] = f"{f.home} – {f.away}"
-            p = ((f.implied or {}).get(key) or {}).get(leg.selection) if key else None
-            if p:
-                row.update(prob=p, fair=1 / p, ratio=leg.odds * p, key=key, match_id=f.match_id)
+            if parts and f.implied_rates:
+                p = joint_prob(*f.implied_rates, parts)
+                if p > 0.001:
+                    row.update(prob=p, fair=1 / p, ratio=leg.odds * p, key=market_key(parts),
+                               match_id=f.match_id, builder=len(parts) > 1)
         out.append(row)
     return out
 
 
 def remember(engine: Engine, rows: list[dict]) -> int:
     """Beobachtungen (Sporttip-Quote / faire Quote) speichern; gleiche Wette nur einmal."""
-    new = [{"match_id": r["match_id"], "key": r["key"], "sel": r["leg"].selection, "odds": r["leg"].odds,
-            "fair": r["fair"], "at": utcnow().isoformat()} for r in rows if r.get("ratio")]
+    # Boosts nicht lernen: sie sind absichtlich erhöht und verfälschen die normale Sporttip-Marge
+    new = [{"match_id": r["match_id"], "key": r["key"], "sel": "+".join(p.selection for p in r["leg"].parts),
+            "odds": r["leg"].odds, "fair": r["fair"], "at": utcnow().isoformat()}
+           for r in rows if r.get("ratio") and not r["leg"].boosted]
     with session_scope(engine) as s:
         row = s.get(AppSetting, OBS_KEY)
         obs = list(row.value) if row and isinstance(row.value, list) else []

@@ -85,7 +85,13 @@ def _find_legs(plan: dict, tip_id: str) -> list[dict] | None:
         c = next((c for c in plan.get("day_combos", []) + plan.get("risky_combos", []) + plan.get("krass_combos", []) if c["id"] == tid), None)
         if not c:
             return None
-        return [{**l, "market": split_market(l["market"])[0], "line": split_market(l["market"])[1]} for l in c["legs"]]
+        out = []
+        for l in c["legs"]:
+            if l["market"] == "BB":  # BetBuilder: jeder Teil-Tipp wird als eigenes Leg abgerechnet
+                out += [{**l, "market": m, "selection": sel, "line": line} for m, sel, line, _half in l["parts"]]
+            else:
+                out.append({**l, "market": split_market(l["market"])[0], "line": split_market(l["market"])[1]})
+        return out
     if tid.startswith("S"):
         t = next((t for t in plan.get("safe", []) if t["id"] == tid), None)
         if not t:
@@ -100,14 +106,22 @@ DAY_BT = {"3": "geht an ca. 6 von 10 Tagen auf (hochgerechnet aus 83 % pro Tipp)
           "5": "ging an 46 von 100 Tagen auf", "6": "ging an 41 von 100 Tagen auf"}
 # Einsatz-Empfehlung in % der eigenen Wettkasse: je unsicherer, desto kleiner
 STAKE_PCT = {"3": 2.0, "5": 1.0, "6": 1.0, "risky": 0.5, "krass": 0.25}
-KRASS_BT = ("Krass: Tipps dieser Art im Backtest ca. 64 % richtig – die ganze Kombi geht nur etwa an "
-            "1 von 10 Tagen auf. Nur Mini-Einsatz.")
-RISKY_BT = "Risiko: Einzeltipps dieser Art im Backtest ca. 65 % richtig. Nur kleiner Einsatz."
+BUILDER_HOWTO = ("🧩 So setzen: bei Sporttip im Spiel auf „BetBuilder“ die Tipps eines Spiels zusammenstellen, "
+                 "dann die BetBuilder auf einen Schein. Geht das nicht: jeden BetBuilder einzeln.")
+KRASS_BT = ("Krass: 3 BetBuilder – Tipps, die oft gemeinsam eintreten, exakt aus allen Endständen gerechnet. "
+            "Geht etwa an 1 von 10 Tagen auf. Nur Mini-Einsatz.\n" + BUILDER_HOWTO)
+RISKY_BT = ("Risiko: 2 BetBuilder, exakt aus allen Endständen gerechnet. Geht etwa an 1 von 5 Tagen auf. "
+            "Nur kleiner Einsatz.\n" + BUILDER_HOWTO)
 
 
 def _leg_odds(l: dict) -> str:
     """Quoten-Zeile eines Legs: Sporttip-Mindestquote (= faire Quote) und Live-Quote der Buchmacher."""
-    parts = [f"Sporttip mind. <b>{1 / l['prob']:.2f}</b>"]
+    if l.get("market") == "BB":
+        parts = [f"BetBuilder fair <b>{1 / l['prob']:.2f}</b>"]
+        if l.get("lift", 0) > 1.05:
+            parts.append(f"🔗 treten {l['lift']:.1f}× öfter gemeinsam ein")
+    else:
+        parts = [f"Sporttip mind. <b>{1 / l['prob']:.2f}</b>"]
     if l.get("sporttip_est"):
         ok = "✅" if l["sporttip_est"] >= 1 / l["prob"] else "❌"
         parts.append(f"Sporttip ca. {l['sporttip_est']:.2f} {ok}")
@@ -158,29 +172,40 @@ def check_sporttip(plan: dict, combo_id: str, quotes: list[float]) -> str:
 
 
 def format_slip(rows: list[dict], total_odds: float | None, learned: int) -> str:
-    """Antwort auf einen Sporttip-Screenshot: jede Wette gegen die faire Quote."""
+    """Antwort auf einen Sporttip-Screenshot: jede Wette (auch BetBuilder, Handicap, 1. HZ, Boost) gegen
+    die faire Quote. 💎 = Sporttip zahlt mehr als fair (Value)."""
     lines = ["🇨🇭 <b>Sporttip-Schein geprüft</b>"]
-    fair_total, st_total, complete = 1.0, 1.0, True
+    fair_total, st_total, complete, value = 1.0, 1.0, True, []
     for r in rows:
         leg = r["leg"]
+        mark = ("🚀 " if leg.boosted else "") + ("🧩 " if len(leg.parts) > 1 else "")
         if r["fair"] is None:
             complete = False
-            lines.append(f"❔ <b>{r['match']}</b> · {tip(leg.market_text)} @ {leg.odds:.2f} – keine faire Quote gefunden")
+            lines.append(f"❔ {mark}<b>{r['match']}</b> · {tip(leg.market_text)} @ {leg.odds:.2f} – nicht berechenbar")
             continue
         fair_total *= r["fair"]
         st_total *= leg.odds
-        icon = "✅" if leg.odds >= r["fair"] else "⚠️" if leg.odds >= r["fair"] * 0.95 else "❌"
-        lines.append(f"{icon} <b>{r['match']}</b> · {tip(leg.market_text)}: Sporttip <b>{leg.odds:.2f}</b> / fair "
-                     f"{r['fair']:.2f} ({leg.odds / r['fair'] - 1:+.0%}) · Chance {r['prob']:.0%}")
+        edge = leg.odds / r["fair"] - 1
+        icon = "💎" if edge >= 0.02 else "✅" if edge >= 0 else "⚠️" if edge >= -0.05 else "❌"
+        if edge >= 0.02:
+            value.append((edge, r))
+        lines.append(f"{icon} {mark}<b>{r['match']}</b> · {tip(leg.market_text)}: Sporttip <b>{leg.odds:.2f}</b> / "
+                     f"fair {r['fair']:.2f} (<b>{edge:+.0%}</b>) · Chance {r['prob']:.0%}")
     priced = [r for r in rows if r["fair"]]
-    if len(priced) > 1 and complete:
-        total = total_odds or st_total
-        value = total / fair_total - 1
-        verdict = ("✅ <b>Gute Quote</b> – spielbar." if value >= 0 else
-                   "⚠️ Knapp unter fair – wenn, dann nur kleiner Einsatz." if value >= -0.05 else
-                   "❌ <b>Zu tief</b> – Sporttip zahlt zu wenig; Spiele mit ❌ weglassen.")
-        lines.append(f"\nKombi: Sporttip <b>{total:.2f}</b> · fair {fair_total:.2f} → <b>{value:+.1%}</b>\n{verdict}")
-        lines.append(f"Trefferchance gesamt {1 / fair_total:.0%}")
+    if value:
+        lines.append("\n💎 <b>VALUE gefunden</b> – hier zahlt Sporttip mehr als fair:")
+        for edge, r in sorted(value, key=lambda x: -x[0])[:5]:
+            lines.append(f"  • <b>{r['match']}</b> · {tip(r['leg'].market_text)} @ {r['leg'].odds:.2f} ({edge:+.0%})")
+        lines.append("  <i>Am besten einzeln spielen, kleiner Einsatz (1–2 % der Wettkasse).</i>")
+    if len(priced) > 1 and complete and total_odds:
+        v = total_odds / fair_total - 1
+        verdict = ("✅ <b>Gute Quote</b> – spielbar." if v >= 0 else
+                   "⚠️ Knapp unter fair – wenn, dann nur kleiner Einsatz." if v >= -0.05 else
+                   "❌ <b>Zu tief</b> – Sporttip zahlt zu wenig; Wetten mit ❌ weglassen.")
+        lines.append(f"\nWettschein: Sporttip <b>{total_odds:.2f}</b> · fair {fair_total:.2f} → <b>{v:+.1%}</b>\n"
+                     f"{verdict}\nTrefferchance gesamt {1 / fair_total:.0%}")
+    elif not value and priced:
+        lines.append("\nKein Value auf diesem Bild – Sporttip zahlt überall weniger als fair.")
     if learned:
         lines.append(f"\n📚 {learned} Quote(n) gelernt – damit schätze ich Sporttip-Quoten in den Tipps.")
     return "\n".join(lines)
@@ -198,7 +223,7 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
             icon = {"bestätigt": " ✅", "vorsicht": " ⚠️", "streichen": " ❌"}
             legs = "\n".join(f"  {i}. <b>{state.local(l['kickoff']).strftime('%H:%M')} {l['match']}</b>"
                               f" <i>({l.get('comp_name') or l.get('comp', '')})</i>\n"
-                              f"     ➡️ {tip(l['label'])} <b>({l['prob']:.0%})</b>"
+                              f"     {'🧩' if l.get('market') == 'BB' else '➡️'} {tip(l['label'])} <b>({l['prob']:.0%})</b>"
                               f"{icon.get((l.get('agent') or {}).get('assessment'), '')}"
                               + (f"\n     <i>🔄 vom Scout gewählt statt „{l['switched_from']}“</i>"
                                  if l.get("switched_from") else "")
@@ -217,10 +242,12 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
             wide = ("\n<i>Heute gibt es nicht genug Spiele im Bereich 75–88 %, darum etwas "
                     "breiter gewählt.</i>" if c.get("widened") else "")
             if c.get("krass"):
-                head = f"🔥 <b>{c['id']} · Krass-Kombi {d}</b> ({c['size']} Spiele, Quote ca. {c['fair_odds']:.0f})"
+                head = f"🔥 <b>{c['id']} · Krass-Kombi {d}</b> ({c['size']} BetBuilder, Quote ca. {c['fair_odds']:.0f})"
                 bt, pct = KRASS_BT, STAKE_PCT["krass"]
             elif c.get("risky"):
-                head = f"🎲 <b>{c['id']} · Risiko-Kombi {d}</b> ({c['size']} Spiele, höhere Quote)"
+                head = (f"🎲 <b>{c['id']} · Risiko-Kombi {d}</b> ({c['size']} BetBuilder, Quote ca. "
+                        f"{c['fair_odds']:.1f})" if c.get("builder") else
+                        f"🎲 <b>{c['id']} · Risiko-Kombi {d}</b> ({c['size']} Spiele, höhere Quote)")
                 bt, pct = RISKY_BT, STAKE_PCT["risky"]
             else:
                 head = f"🎯 <b>{c['id']} · {c['size']}er-Tageskombi {d}</b>"
@@ -333,8 +360,8 @@ def format_stats(engine) -> str:
 
 COMMANDS = [
     ("tageskombi", "3er- und 5er-Kombi, alle Spiele am selben Tag"),
-    ("risiko", "Risiko-Kombi: 3 Spiele mit höherer Quote"),
-    ("krass", "Krass-Kombi: 5 Spiele, Quote ca. 8–12"),
+    ("risiko", "Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8"),
+    ("krass", "Krass-Kombi: 3 BetBuilder, Quote ca. 8–25"),
     ("sporttip", "Sporttip-Quoten prüfen: /sporttip T1 1.30 1.25 …"),
     ("kosten", "Claude-Kosten heute"),
     ("sicher", "Tipps mit hoher Trefferquote"),
@@ -381,8 +408,8 @@ def build(engine) -> Application | None:
             return
         await reply(update, "👋 PeaceJudge ist bereit.\n/heute – Tipps\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/tageskombi – 3er- und 5er-Kombi, alle Spiele am selben Tag\n"
-                            "/risiko – Risiko-Kombi mit höherer Quote\n"
-                            "/krass – Krass-Kombi, Quote ca. 8–12\n"
+                            "/risiko – Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8\n"
+                            "/krass – Krass-Kombi: 3 BetBuilder, Quote ca. 8–25\n"
                             "/sporttip T1 Quoten – Sporttip-Quoten prüfen\n"
                             "📸 Screenshot vom Sporttip-Schein schicken – ich prüfe die Quoten\n"
                             "/sicher – Tipps mit hoher Trefferquote (Über/Unter, 1X …)\n"

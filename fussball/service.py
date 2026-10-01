@@ -565,8 +565,14 @@ RISKY_MARKETS = ("1X2", "OU2.5", "BTTS")
 RISKY_EXCLUDED = EXCLUDED_TIPS | {("BTTS", "N")}
 
 
+# Krass-Kombi: 5 Spiele mit 55–70 % pro Tipp → Gesamtquote ca. 8–12, geht etwa an 1 von 10 Tagen auf.
+# Märkte, die im Backtest in diesem Bereich kalibriert sind.
+KRASS_MARKETS = ("1X2", "OU2.5", "BTTS", "HOME1.5", "AWAY1.5")
+
+
 def risky_combos(forecasts: list[MatchForecast], safe_combos: list[dict], size: int = 3, min_prob: float = 0.60,
-                 max_prob: float = 0.72, tz: str = "Europe/Zurich", skip: set[int] | None = None) -> list[dict]:
+                 max_prob: float = 0.72, tz: str = "Europe/Zurich", skip: set[int] | None = None,
+                 markets: tuple[str, ...] = RISKY_MARKETS) -> list[dict]:
     """Pro Tag eine Risiko-Kombi aus `size` Spielen, möglichst andere als in der sicheren Tageskombi."""
     from zoneinfo import ZoneInfo
 
@@ -576,7 +582,7 @@ def risky_combos(forecasts: list[MatchForecast], safe_combos: list[dict], size: 
         used.setdefault(c["day"], set()).update(l["match_id"] for l in c["legs"])
     by_day: dict[str, list[dict]] = {}
     for t in best_tip_per_match([f for f in forecasts if f.match_id not in (skip or set())], min_prob, max_prob,
-                                RISKY_MARKETS, exclude=RISKY_EXCLUDED):
+                                markets, exclude=RISKY_EXCLUDED):
         day = datetime.fromisoformat(t["kickoff"]).replace(tzinfo=ZoneInfo("UTC")).astimezone(zone).date().isoformat()
         by_day.setdefault(day, []).append(t)
     out = []
@@ -586,7 +592,7 @@ def risky_combos(forecasts: list[MatchForecast], safe_combos: list[dict], size: 
                                                   -(t["prob"] + (GOAL_BONUS if _is_goal_market(t["market"]) else 0))))
         if len(legs) < size:
             continue
-        chosen = sorted(legs[:size], key=lambda t: t["kickoff"])
+        chosen = sorted(_varied(legs, size), key=lambda t: t["kickoff"])
         prob = float(np.prod([t["prob"] for t in chosen]))
         out.append({"day": day, "size": size, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
                     "leg_min": min(t["prob"] for t in chosen), "risky": True})
@@ -784,6 +790,7 @@ class DailyPlan:
     day_combos: list[dict] = field(default_factory=list)
     all_forecasts: list = field(default_factory=list)
     risky_combos: list[dict] = field(default_factory=list)
+    krass_combos: list[dict] = field(default_factory=list)
 
 
 def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | None = None) -> DailyPlan:

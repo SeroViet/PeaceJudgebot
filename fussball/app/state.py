@@ -56,6 +56,7 @@ def serialize_plan(plan: service.DailyPlan) -> dict:
         "safe": safe,
         "day_combos": [{**c, "id": f"T{i}"} for i, c in enumerate(plan.day_combos, start=1)],
         "risky_combos": [{**c, "id": f"R{i}"} for i, c in enumerate(plan.risky_combos, start=1)],
+        "krass_combos": [{**c, "id": f"X{i}"} for i, c in enumerate(plan.krass_combos, start=1)],
         "forecasts": [f.to_dict() for f in plan.forecasts],
         "singles": singles,
         "combos": combos,
@@ -101,13 +102,17 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
             info["agent"] += service.apply_agents_risky(engine, plan, cached_only=not agents)
         except Exception:  # noqa: BLE001
             log.exception("Agenten (Risiko-Kombi) fehlgeschlagen")
+        kc = plan.config.get("krass_combo", {})
+        plan.krass_combos = [{**c, "krass": True} for c in service.risky_combos(
+            plan.all_forecasts or plan.forecasts, plan.day_combos + plan.risky_combos, kc.get("size", 5),
+            kc.get("min_prob", 0.55), kc.get("max_prob", 0.70), markets=service.KRASS_MARKETS)]
         books = plan.config.get("bookmakers") or None
-        service.attach_book_odds(engine, plan.day_combos, books)
-        service.attach_book_odds(engine, plan.risky_combos, books)
+        for combos in (plan.day_combos, plan.risky_combos, plan.krass_combos):
+            service.attach_book_odds(engine, combos, books)
         from fussball.agents import slip
 
         table = slip.ratios(engine)
-        for c in plan.day_combos + plan.risky_combos:
+        for c in plan.day_combos + plan.risky_combos + plan.krass_combos:
             for leg in c["legs"]:
                 leg["sporttip_est"] = slip.estimate(table, leg["market"], 1 / leg["prob"])
         data = serialize_plan(plan)

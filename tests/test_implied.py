@@ -128,3 +128,15 @@ def test_combo_varies_tips_and_offers_team_goals():
     labels = [l["label"] for l in legs]
     # höchstens 2× derselbe Tipp; erst wenn es nicht anders geht (nur 2 Tipp-Arten), wird aufgefüllt
     assert sum("trifft" in x for x in labels) == 2 and labels.count("Über 1.5 Tore") == 3
+
+
+def test_krass_combo_high_odds():
+    from fussball.service import KRASS_MARKETS, risky_combos
+
+    fs = [MatchForecast(i, "D1", "BL", datetime(2026, 10, 10, 12 + i, 0), f"H{i}", f"A{i}", 1.6, 1.3, {}, {}, {},
+                        None, None, 0.0, {}, implied={"OU2.5": {"O": 0.62, "U": 0.38}, "BTTS": {"Y": 0.60, "N": 0.40},
+                                                      "OU1.5": {"O": 0.85, "U": 0.15}}) for i in range(6)]
+    c = risky_combos(fs, [], size=5, min_prob=0.55, max_prob=0.70, markets=KRASS_MARKETS)[0]
+    assert c["size"] == 5 and c["fair_odds"] > 8
+    labels = [l["label"] for l in c["legs"]]
+    assert "Über 1.5 Tore" not in labels and labels.count("Über 2.5 Tore") <= 3

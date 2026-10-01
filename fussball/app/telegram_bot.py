@@ -74,8 +74,8 @@ def _find_legs(plan: dict, tip_id: str) -> list[dict] | None:
     if tid.startswith("K"):
         c = next((c for c in plan["combos"] if c["id"] == tid), None)
         return c["legs"] if c else None
-    if tid.startswith(("T", "R")):
-        c = next((c for c in plan.get("day_combos", []) + plan.get("risky_combos", []) if c["id"] == tid), None)
+    if tid.startswith(("T", "R", "X")):
+        c = next((c for c in plan.get("day_combos", []) + plan.get("risky_combos", []) + plan.get("krass_combos", []) if c["id"] == tid), None)
         if not c:
             return None
         return [{**l, "market": split_market(l["market"])[0], "line": split_market(l["market"])[1]} for l in c["legs"]]
@@ -92,7 +92,9 @@ def _find_legs(plan: dict, tip_id: str) -> list[dict] | None:
 DAY_BT = {"3": "geht an ca. 6 von 10 Tagen auf (hochgerechnet aus 83 % pro Tipp)",
           "5": "ging an 46 von 100 Tagen auf", "6": "ging an 41 von 100 Tagen auf"}
 # Einsatz-Empfehlung in % der eigenen Wettkasse: je unsicherer, desto kleiner
-STAKE_PCT = {"3": 2.0, "5": 1.0, "6": 1.0, "risky": 0.5}
+STAKE_PCT = {"3": 2.0, "5": 1.0, "6": 1.0, "risky": 0.5, "krass": 0.25}
+KRASS_BT = ("Krass: Tipps dieser Art im Backtest ca. 64 % richtig – die ganze Kombi geht nur etwa an "
+            "1 von 10 Tagen auf. Nicht vom Scout geprüft. Nur Mini-Einsatz.")
 RISKY_BT = "Risiko: Einzeltipps dieser Art im Backtest ca. 65 % richtig. Nur kleiner Einsatz."
 
 
@@ -117,7 +119,7 @@ def _odds_time(legs: list[dict]) -> str:
 def check_sporttip(plan: dict, combo_id: str, quotes: list[float]) -> str:
     """Sporttip-Quoten mit den fairen Quoten der Tageskombi vergleichen.
     Eine Zahl = Gesamtquote der Kombi; sonst eine Quote pro Spiel (in der Reihenfolge der Nachricht)."""
-    c = next((c for c in plan.get("day_combos", []) + plan.get("risky_combos", [])
+    c = next((c for c in plan.get("day_combos", []) + plan.get("risky_combos", []) + plan.get("krass_combos", [])
               if c["id"].upper() == combo_id.upper()), None)
     if c is None:
         return f"Kombi {combo_id} nicht gefunden. Die aktuelle Nummer steht in /tageskombi (z. B. T1)."
@@ -207,12 +209,17 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
                          f"{'✅' if est >= c['fair_odds'] else '❌ unter fair'}\n")
             wide = ("\n<i>Heute gibt es nicht genug Spiele im Bereich 75–88 %, darum etwas "
                     "breiter gewählt.</i>" if c.get("widened") else "")
-            head = (f"🎲 <b>{c['id']} · Risiko-Kombi {d}</b> ({c['size']} Spiele, höhere Quote)" if c.get("risky")
-                    else f"🎯 <b>{c['id']} · {c['size']}er-Tageskombi {d}</b>")
-            bt = RISKY_BT if c.get("risky") else f"Backtest {c['size']}er: {DAY_BT.get(str(c['size']), '')}"
-            pct = STAKE_PCT["risky" if c.get("risky") else str(c["size"])] if (c.get("risky") or
-                                                                              str(c["size"]) in STAKE_PCT) else 1.0
-            bt += f"\n💰 Einsatz: höchstens {pct:g} % deiner Wettkasse (bei 200 CHF = {2 * pct:.0f} CHF)"
+            if c.get("krass"):
+                head = f"🔥 <b>{c['id']} · Krass-Kombi {d}</b> ({c['size']} Spiele, Quote ca. {c['fair_odds']:.0f})"
+                bt, pct = KRASS_BT, STAKE_PCT["krass"]
+            elif c.get("risky"):
+                head = f"🎲 <b>{c['id']} · Risiko-Kombi {d}</b> ({c['size']} Spiele, höhere Quote)"
+                bt, pct = RISKY_BT, STAKE_PCT["risky"]
+            else:
+                head = f"🎯 <b>{c['id']} · {c['size']}er-Tageskombi {d}</b>"
+                bt = f"Backtest {c['size']}er: {DAY_BT.get(str(c['size']), '')}"
+                pct = STAKE_PCT.get(str(c["size"]), 1.0)
+            bt += f"\n💰 Einsatz: höchstens {pct:g} % deiner Wettkasse (bei 200 CHF = {2 * pct:.2f} CHF)"
             out.append(f"{head}\n{legs}\n"
                        f"Trefferchance gesamt <b>{c['prob']:.0%}</b> · faire Gesamtquote <b>{c['fair_odds']:.2f}</b>\n"
                        f"{live}"
@@ -228,9 +235,10 @@ def format_today(plan: dict) -> str:
 
     today = datetime.now(state.TZ).date().isoformat()
     text = _format_today_safe(plan, today)
-    risky = [c for c in plan.get("risky_combos", []) if c["day"] == today]
-    if risky:
-        text += "\n\n" + format_day_combos({**plan, "day_combos": risky}, max_days=1)
+    for key in ("risky_combos", "krass_combos"):
+        extra = [c for c in plan.get(key, []) if c["day"] == today]
+        if extra:
+            text += "\n\n" + format_day_combos({**plan, "day_combos": extra}, max_days=1)
     return text
 
 
@@ -318,6 +326,7 @@ def format_stats(engine) -> str:
 COMMANDS = [
     ("tageskombi", "3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("risiko", "Risiko-Kombi: 3 Spiele mit höherer Quote"),
+    ("krass", "Krass-Kombi: 5 Spiele, Quote ca. 8–12"),
     ("sporttip", "Sporttip-Quoten prüfen: /sporttip T1 1.30 1.25 …"),
     ("sicher", "Tipps mit hoher Trefferquote"),
     ("heute", "Value-Tipps und Sicher-Tipps"),
@@ -364,6 +373,7 @@ def build(engine) -> Application | None:
         await reply(update, "👋 PeaceJudge ist bereit.\n/heute – Tipps\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/tageskombi – 3er- und 5er-Kombi, alle Spiele am selben Tag\n"
                             "/risiko – Risiko-Kombi mit höherer Quote\n"
+                            "/krass – Krass-Kombi, Quote ca. 8–12\n"
                             "/sporttip T1 Quoten – Sporttip-Quoten prüfen\n"
                             "📸 Screenshot vom Sporttip-Schein schicken – ich prüfe die Quoten\n"
                             "/sicher – Tipps mit hoher Trefferquote (Über/Unter, 1X …)\n"
@@ -443,6 +453,12 @@ def build(engine) -> Application | None:
         await reply(update, format_day_combos({**plan, "day_combos": combos}, max_days=2) if combos
                     else "Keine Risiko-Kombi möglich (zu wenige Spiele mit 60–72 % an einem Tag).")
 
+    async def cmd_krass(update: Update, _ctx):
+        plan = state.load_plan()
+        combos = plan.get("krass_combos", [])
+        await reply(update, format_day_combos({**plan, "day_combos": combos}, max_days=2) if combos
+                    else "Keine Krass-Kombi möglich (zu wenige Spiele mit 55–70 % an einem Tag).")
+
     async def cmd_sporttip(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         try:
             combo_id, quotes = ctx.args[0], [float(a.replace(",", ".")) for a in ctx.args[1:]]
@@ -502,7 +518,7 @@ def build(engine) -> Application | None:
     app.add_handler(CommandHandler("start", cmd_start))
     for name, fn in (("heute", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update),
-                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky)):
+                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     app.add_handler(MessageHandler((filters.PHOTO | filters.Document.IMAGE) & only_owner, on_photo))
     return app

@@ -65,11 +65,13 @@ def recent_report(engine: Engine, match_id: int, max_age_h: float) -> AgentRepor
 
 
 def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float = 10.0,
-                 local_time=None) -> list[dict]:
-    """Scout für jede Leg (Spiel + Tipp). Gibt pro Leg {match_id, assessment, text, cached} zurück."""
-    client = client or scout.make_client()
-    if client is None:
+                 local_time=None, cached_only: bool = False, max_searches: int | None = None) -> list[dict]:
+    """Scout für jede Leg (Spiel + Tipp). Gibt pro Leg {match_id, assessment, text, cached} zurück.
+    `cached_only`: nur gespeicherte Berichte verwenden, keine neue (kostenpflichtige) Recherche."""
+    client = client or (None if cached_only else scout.make_client())
+    if client is None and not cached_only:
         return []
+    searches = max_searches or int(os.getenv("AGENT_MAX_SEARCHES", "6"))
     out = []
     for leg in legs:
         cached = recent_report(engine, leg["match_id"], max_age_h)
@@ -79,6 +81,8 @@ def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float
                         "reason": intel.tip_reason, "best_tip": intel.best_tip,
                         "text": scout.format_intel(leg["match"], leg["label"], intel), "cached": True})
             continue
+        if cached_only:
+            continue
         if spent_today(engine) >= daily_budget():
             log.warning("Agenten-Tagesbudget erreicht (%.2f USD)", daily_budget())
             break
@@ -86,7 +90,8 @@ def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float
         try:
             res = scout.scout_match(client, leg["match"], str(kickoff), leg.get("comp_name") or leg.get("comp", ""),
                                     leg["label"], fatigue_context(engine, leg["match_id"]),
-                                    alternatives=[a["label"] for a in leg.get("alternatives", [])] or None)
+                                    alternatives=[a["label"] for a in leg.get("alternatives", [])] or None,
+                                    max_searches=searches)
         except Exception as exc:  # noqa: BLE001 – ein Fehler darf die übrigen Spiele nicht stoppen
             log.exception("Scout fehlgeschlagen für %s", leg["match"])
             out.append({"match_id": leg["match_id"], "assessment": "fehler", "reason": repr(exc)[:200],

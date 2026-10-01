@@ -3,7 +3,8 @@
 - Start: Telegram-Meldung; bei leerer Datenbank zuerst Historie laden (Erststart)
 - alle REFRESH_HOURS (Standard 3): Daten laden, Wetten abrechnen, Tipps neu berechnen
   → Alarm bei neuen/gestrichenen Tipps, Ergebnis jeder abgerechneten Wette
-- täglich um DAILY_REPORT_TIME (Europe/Zurich, Standard 09:00): nur die Tageskombi (5–6 Spiele)
+- täglich um DAILY_REPORT_TIME (Europe/Zurich, Standard 09:00): Scout prüft die Kombis (einziger
+  regulärer Agentenlauf), dann nur die Tageskombi (5–6 Spiele) + Risiko-Kombi senden
 - REMINDER_MINUTES (Standard 60) vor Anpfiff: Erinnerung mit Mindestquote
 - nach dem ersten Durchlauf nach dem Start: Tageskombi von heute (STARTUP_TIPS=0 schaltet ab)
 - Render-Gratisplan: alle 10 Minuten /healthz über die öffentliche Adresse aufrufen, damit der
@@ -43,7 +44,7 @@ async def start(engine) -> list:
                                         "Ergebnissen. /start zeigt alle Befehle.")
     if os.getenv("DISABLE_SCHEDULER") == "1":
         return []
-    tasks = [asyncio.create_task(_refresh_loop(engine)), asyncio.create_task(_daily_loop()),
+    tasks = [asyncio.create_task(_refresh_loop(engine)), asyncio.create_task(_daily_loop(engine)),
              asyncio.create_task(_reminder_loop(engine))]
     url = os.getenv("RENDER_EXTERNAL_URL")
     if url and os.getenv("KEEP_AWAKE", "1") == "1":
@@ -126,10 +127,23 @@ def _seconds_until(hhmm: str) -> float:
     return (target - now).total_seconds()
 
 
-async def _daily_loop():
+async def _daily_loop(engine=None):
+    """Einmal täglich: Quoten holen, Scout prüft die Kombis des Tages (einziger kostenpflichtiger
+    Agentenlauf – Neustarts lösen keine Agenten aus), dann die Tageskombi senden."""
     when = os.getenv("DAILY_REPORT_TIME", "09:00")
+    loop = asyncio.get_running_loop()
     while True:
         await asyncio.sleep(_seconds_until(when))
+        for _ in range(20 if engine is not None else 0):  # läuft gerade ein Refresh: kurz warten
+            try:
+                info = await loop.run_in_executor(None, lambda: state.refresh(
+                    engine, days=int(os.getenv("TIP_DAYS", "3")), agents=True))
+            except Exception:  # noqa: BLE001
+                log.exception("Täglicher Lauf fehlgeschlagen")
+                break
+            if not info.get("skipped"):
+                break
+            await asyncio.sleep(30)
         plan = state.load_plan()
         await telegram_bot.notify(_bot, "☀️ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))
         await asyncio.sleep(60)
@@ -178,7 +192,7 @@ async def _reminder_loop(engine=None):
                 for leg in due_lineup_checks(plan, utcnow(), lineup_min, _reminded):
                     _reminded.add(f"L{leg['match_id']}")
                     res = await loop.run_in_executor(None, lambda leg=leg: runner.analyze_legs(
-                        engine, [leg], max_age_h=0.3, local_time=state.local))
+                        engine, [leg], max_age_h=0.3, local_time=state.local, max_searches=3))
                     if res and res[0]["assessment"] == "streichen":
                         await telegram_bot.notify(_bot, "📋 <b>Aufstellungs-Check vor Anpfiff</b>\n" + res[0]["text"])
         except Exception:  # noqa: BLE001

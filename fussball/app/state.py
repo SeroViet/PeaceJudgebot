@@ -72,7 +72,7 @@ def load_plan() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def refresh(engine: Engine, fetch: bool = True, days: int = 3) -> dict:
+def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = False) -> dict:
     """Daten laden, Wetten abrechnen, Prognosen und Plan neu berechnen."""
     if not _lock.acquire(blocking=False):
         return {"skipped": "läuft bereits"}
@@ -87,16 +87,18 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3) -> dict:
         info["settled"] = service.settle_bets(engine, details)
         info["settled_details"] = details
         plan = service.daily_plan(engine, days=days)
+        info["agent"] = []
+        # Agenten kosten Geld: nur auf Anforderung (täglicher Lauf), nie bei jedem Neustart/Refresh.
+        # Ohne Agentenlauf werden die letzten Bewertungen (Cache) übernommen, ohne neue Kosten.
         try:
-            info["agent"] = service.apply_agents(engine, plan)
+            info["agent"] = service.apply_agents(engine, plan, cached_only=not agents)
         except Exception:  # noqa: BLE001 – ohne Agenten weiterarbeiten
             log.exception("Agenten fehlgeschlagen")
-            info["agent"] = []
         rc = plan.config.get("risky_combo", {})
         plan.risky_combos = service.risky_combos(plan.all_forecasts or plan.forecasts, plan.day_combos,
                                                  rc.get("size", 3), rc.get("min_prob", 0.60), rc.get("max_prob", 0.72))
         try:
-            info["agent"] += service.apply_agents_risky(engine, plan)
+            info["agent"] += service.apply_agents_risky(engine, plan, cached_only=not agents)
         except Exception:  # noqa: BLE001
             log.exception("Agenten (Risiko-Kombi) fehlgeschlagen")
         books = plan.config.get("bookmakers") or None

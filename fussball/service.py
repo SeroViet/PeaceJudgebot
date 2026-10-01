@@ -573,7 +573,8 @@ def risky_combos(forecasts: list[MatchForecast], safe_combos: list[dict], size: 
     return out
 
 
-def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0) -> list[dict]:
+def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,
+                       cached_only: bool = False) -> list[dict]:
     """Scout prüft die Risiko-Kombi des nächsten Tages; gestrichene Spiele werden ersetzt (eine Runde)."""
     from fussball.agents import runner
     from fussball.app.state import local
@@ -583,7 +584,8 @@ def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h
             if now < datetime.fromisoformat(c["legs"][0]["kickoff"]) <= now + timedelta(hours=horizon_h)]
     if not soon:
         return []
-    res = {r["match_id"]: r for r in runner.analyze_legs(engine, soon[0]["legs"], client=client, local_time=local)}
+    res = {r["match_id"]: r for r in runner.analyze_legs(engine, soon[0]["legs"], client=client, local_time=local,
+                                                         cached_only=cached_only)}
     struck = {mid for mid, r in res.items() if r["assessment"] == "streichen"}
     if struck:
         rc = plan.config.get("risky_combo", {})
@@ -598,7 +600,7 @@ def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h
 
 
 def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,
-                 max_rounds: int = 3) -> list[dict]:
+                 max_rounds: int = 3, cached_only: bool = False) -> list[dict]:
     """Scout-Agent prüft die Legs der nächsten Tageskombi (innerhalb `horizon_h`).
     Gestrichene Spiele werden ausgeschlossen und die Kombi neu gebaut (nachrücken);
     Spiele mit „vorsicht“ ebenso, solange danach noch eine Kombi für den Tag zustande kommt."""
@@ -625,7 +627,7 @@ def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: floa
         todo = [l for mid, l in legs.items() if mid not in results]
         if not todo:
             break
-        for r in runner.analyze_legs(engine, todo, client=client, local_time=local):
+        for r in runner.analyze_legs(engine, todo, client=client, local_time=local, cached_only=cached_only):
             results[r["match_id"]] = r
         struck = {mid for mid, r in results.items() if r["assessment"] == "streichen"}
         risky = {mid for mid, r in results.items() if r["assessment"] == "vorsicht"}

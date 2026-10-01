@@ -147,3 +147,15 @@ def test_scout_can_switch_to_better_supported_tip(engine, fixture_bytes, bundesl
     assert new["label"] == other and new["switched_from"]
     c = plan.day_combos[0]
     assert c["fair_odds"] == pytest.approx(1 / c["prob"])
+
+
+def test_cached_only_never_calls_claude(engine, fixture_bytes, bundesliga, monkeypatch):
+    monkeypatch.setattr(runner, "fatigue_context", lambda e, mid: "ctx")
+    plan = _plan_with_matches(engine, fixture_bytes, bundesliga)
+    client = FakeClient({})
+    assert service.apply_agents(engine, plan, client=client, cached_only=True) == []
+    assert client.calls == 0
+    service.apply_agents(engine, plan, client=client)  # echter Lauf speichert Berichte
+    paid = client.calls
+    again = service.apply_agents(engine, plan, client=client, cached_only=True)
+    assert client.calls == paid and again and all(r["cached"] for r in again)

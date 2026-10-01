@@ -161,9 +161,9 @@ def structure(client, research_text: str, match: str, tip: str, model: str = MOD
 
 
 def scout_match(client, match: str, kickoff_local: str, competition: str, tip: str, context: str,
-                model: str = MODEL, alternatives: list[str] | None = None) -> ScoutResult:
+                model: str = MODEL, alternatives: list[str] | None = None, max_searches: int = 6) -> ScoutResult:
     text, c1, searches = research(client, match, kickoff_local, competition, tip, context, model,
-                                  alternatives=alternatives)
+                                  max_searches=max_searches, alternatives=alternatives)
     intel, c2 = structure(client, text, match, tip, model, alternatives=alternatives)
     if intel.best_tip not in (alternatives or []):
         intel.best_tip = None

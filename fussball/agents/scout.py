@@ -89,8 +89,9 @@ Recherchiere mit der Websuche aktuelle, verlässliche Informationen zum genannte
   direkte Duelle, Spielstil (offensiv, defensiv, Konter), Wetter/Platz falls auffällig
 Suche auch in der Landessprache der Teams (z. B. Deutsch, Englisch, Italienisch, Spanisch,
 Französisch). Bevorzuge offizielle Vereinsseiten, Pressekonferenzen und grosse Sportmedien.
-Gehe mit den Suchen sparsam um: zuerst gezielt nach Vorbericht/Team-News beider Teams,
-dann Sperren/Karten, zuletzt Aufstellung. Erfinde nichts: Wenn eine Information nicht zu
+Gehe mit den Suchen sparsam um: suche zuerst nach einer Vorschau mit Team-News für beide Teams
+(z. B. "<Heim> vs <Gast> preview team news" oder auf Deutsch "Vorschau Aufstellung"), dann
+Sperren/Karten, zuletzt Aufstellung. Funktioniert eine Suche nicht, formuliere sie einfacher um. Erfinde nichts: Wenn eine Information nicht zu
 finden ist, sage das.
 Bewerte danach den vorgegebenen Tipp nur anhand dieser Fakten: Ändern die Ausfälle,
 Aufstellung oder Belastung etwas Wesentliches (z. B. Torjäger fehlt bei einem Über-Tipp,
@@ -100,7 +101,17 @@ Gibt es eine Liste möglicher Tipps, sage am Ende, welcher davon am besten zu de
 Steht bei den Tipps eine geschätzte Sporttip-Quote, gilt: Wenn mehrere Tipps von den Fakten gleich gut
 gestützt werden, nimm den mit dem besten Verhältnis Sporttip-Quote zu fairer Quote (bester Wert).
 Die Fakten haben aber immer Vorrang – nie einen Tipp nur wegen der Quote wählen.
-Nenne keine eigenen Wahrscheinlichkeiten und keine Quoten."""
+Nenne keine eigenen Wahrscheinlichkeiten und keine Quoten.
+
+Regeln für die Bewertung:
+- Das Spiel findet zum angegebenen Termin statt. Zweifle Termin oder Ansetzung nie an.
+- "streichen" nur bei konkreten, gewichtigen Fakten gegen den Tipp (z. B. Torjäger und Ersatz fehlen
+  bei einem Über-Tipp, Stammtorhüter gesperrt, B-Elf angekündigt).
+- "vorsicht" nur bei konkreten Fakten, die den Tipp spürbar schwächen.
+- Fehlende oder dünne Informationen sind KEIN Grund für "vorsicht" oder "streichen". Findest du nichts
+  Negatives, ist der Tipp "bestätigt". Erwähne die dünne Quellenlage höchstens kurz.
+- tip_reason: 1–2 kurze Sätze auf Deutsch mit den wichtigsten Fakten, ohne Meta-Kommentare über
+  deine Suche."""
 
 
 def _cost(model: str, usage, searches: int) -> float:
@@ -200,6 +211,7 @@ def judge_tip(client, intel: MatchIntel, match: str, tip: str, model: str = MODE
                    f"Spiel: {match}\nZu bewertender Tipp: {tip}\n\nRecherchierte Fakten (JSON):\n"
                    f"{intel.model_dump_json()}\n\nBewerte den Tipp nur anhand dieser Fakten: bestätigt, vorsicht "
                    "oder streichen, mit einem kurzen Grund (Ausfälle, Torhüter, Form, Müdigkeit, Aufstellung). "
+                   "Fehlende Infos sind kein Grund für vorsicht/streichen – nur konkrete negative Fakten. "
                    "Keine Quoten, keine Wahrscheinlichkeiten."}],
     )
     if resp.stop_reason == "refusal" or resp.parsed_output is None:

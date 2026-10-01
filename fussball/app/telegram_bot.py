@@ -229,10 +229,12 @@ def check_sporttip(plan: dict, combo_id: str, quotes: list[float]) -> str:
 def verdict(row: dict, check: dict) -> tuple[bool | None, str]:
     """🟢/🔴 für einen Tipp: rot, wenn der Scout ihn streicht oder warnt, oder die Chance unter 50 % liegt."""
     a, reason, prob = check.get("assessment"), check.get("reason", ""), row.get("prob")
-    if a in ("streichen", "vorsicht"):
-        return False, reason
+    if len(reason) > 220:
+        reason = reason[:217].rsplit(" ", 1)[0] + " …"
     if prob is not None and prob < 0.5:
         return False, f"Nur ca. {prob:.0%} Chance – geht öfter nicht auf als auf." + (f" {reason}" if reason else "")
+    if a in ("streichen", "vorsicht"):
+        return False, reason
     if a == "bestätigt":
         return True, reason
     return None, reason or "nicht geprüft"

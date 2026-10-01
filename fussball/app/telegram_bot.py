@@ -6,6 +6,7 @@ Befehle: /heute, /kombi, /spiel <Team>, /bilanz, /gesetzt <Tipp-Nr> <Einsatz> <Q
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
 
@@ -43,12 +44,18 @@ def format_singles(plan: dict) -> str:
     lines = ["<b>Einzeltipps</b>"]
     for t in plan["singles"]:
         lines.append(
-            f"\n<b>#{t['id']}</b> {t['match']} ({t['comp']}, {_fmt_time(t['kickoff'])})\n"
-            f"➡️ {t['label']}\n"
+            f"\n<b>#{t['id']} {_fmt_time(t['kickoff'])} {t['match']}</b> <i>({t['comp']})</i>\n"
+            f"➡️ {tip(t['label'])}\n"
             f"Quote Ø {t['odds']:.2f} · <b>Mindestquote {t['min_odds']:.2f}</b>\n"
             f"Wahrsch. {t['prob']:.0%} · Edge {t['edge']:+.1%} · Einsatz {t['stake']:.2f} {cur}"
         )
     return "\n".join(lines)
+
+
+def tip(label: str) -> str:
+    """Tipp hervorheben: Telegram kennt keine Textfarben – Code-Schrift wird in der App farbig und
+    in eigener Schrift angezeigt (und lässt sich antippen/kopieren)."""
+    return f"<code>{html.escape(label)}</code>"
 
 
 def format_safe(plan: dict, limit: int = 15) -> str:
@@ -58,8 +65,8 @@ def format_safe(plan: dict, limit: int = 15) -> str:
     lines = ["<b>🎯 Sicher-Tipps</b> (Trefferwahrscheinlichkeit 70–90 %)",
              "<i>Historisch: 78 % erwartet → 78 % getroffen (170 000 Tipps, 2020–2026)</i>"]
     for t in safe[:limit]:
-        lines.append(f"\n<b>{t['id']}</b> {t['match']} ({t['comp']}, {_fmt_time(t['kickoff'])})\n"
-                     f"➡️ {t['label']}\n"
+        lines.append(f"\n<b>{t['id']} {_fmt_time(t['kickoff'])} {t['match']}</b> <i>({t['comp']})</i>\n"
+                     f"➡️ {tip(t['label'])}\n"
                      f"Wahrscheinlichkeit <b>{t['prob']:.0%}</b> · faire Quote {t['fair_odds']:.2f} "
                      f"→ bei Sporttip nur spielen, wenn Quote ≥ {t['fair_odds']:.2f}")
     if len(safe) > limit:
@@ -133,7 +140,7 @@ def check_sporttip(plan: dict, combo_id: str, quotes: list[float]) -> str:
             fair = 1 / l["prob"]
             total *= q
             ok = "✅" if q >= fair else "❌"
-            lines.append(f"{ok} {i}. {l['match']} · {l['label']}: Sporttip {q:.2f} / fair {fair:.2f} "
+            lines.append(f"{ok} {i}. <b>{l['match']}</b> · {tip(l['label'])}: Sporttip {q:.2f} / fair {fair:.2f} "
                          f"({q / fair - 1:+.0%})")
     else:
         return (f"Bitte entweder 1 Zahl (Gesamtquote) oder {len(legs)} Quoten (eine pro Spiel) eingeben.\n"
@@ -158,12 +165,12 @@ def format_slip(rows: list[dict], total_odds: float | None, learned: int) -> str
         leg = r["leg"]
         if r["fair"] is None:
             complete = False
-            lines.append(f"❔ {r['match']} · {leg.market_text} @ {leg.odds:.2f} – keine faire Quote gefunden")
+            lines.append(f"❔ <b>{r['match']}</b> · {tip(leg.market_text)} @ {leg.odds:.2f} – keine faire Quote gefunden")
             continue
         fair_total *= r["fair"]
         st_total *= leg.odds
         icon = "✅" if leg.odds >= r["fair"] else "⚠️" if leg.odds >= r["fair"] * 0.95 else "❌"
-        lines.append(f"{icon} {r['match']} · {leg.market_text}: Sporttip <b>{leg.odds:.2f}</b> / fair "
+        lines.append(f"{icon} <b>{r['match']}</b> · {tip(leg.market_text)}: Sporttip <b>{leg.odds:.2f}</b> / fair "
                      f"{r['fair']:.2f} ({leg.odds / r['fair'] - 1:+.0%}) · Chance {r['prob']:.0%}")
     priced = [r for r in rows if r["fair"]]
     if len(priced) > 1 and complete:
@@ -189,9 +196,9 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
         for c in [c for c in combos if c["day"] == day]:
             d = _fmt_day(c["legs"][0]["kickoff"])
             icon = {"bestätigt": " ✅", "vorsicht": " ⚠️", "streichen": " ❌"}
-            legs = "\n".join(f"  {i}. {state.local(l['kickoff']).strftime('%H:%M')} {l['match']}"
+            legs = "\n".join(f"  {i}. <b>{state.local(l['kickoff']).strftime('%H:%M')} {l['match']}</b>"
                               f" <i>({l.get('comp_name') or l.get('comp', '')})</i>\n"
-                              f"     ➡️ <b>{l['label']}</b> ({l['prob']:.0%})"
+                              f"     ➡️ {tip(l['label'])} <b>({l['prob']:.0%})</b>"
                               f"{icon.get((l.get('agent') or {}).get('assessment'), '')}"
                               + (f"\n     <i>🔄 vom Scout gewählt statt „{l['switched_from']}“</i>"
                                  if l.get("switched_from") else "")
@@ -258,7 +265,8 @@ def _format_today_safe(plan: dict, today: str) -> str:
     msg = "📭 Heute kommen weltweit keine 3 Spiele mehr mit sicheren Pinnacle-Tipps – darum keine Kombi."
     if rest:
         msg += "\n\n⚽ <b>Heute noch als Einzeltipps:</b>\n" + "\n".join(
-            f"  {state.local(t['kickoff']).strftime('%H:%M')} {t['match']}\n     ➡️ <b>{t['label']}</b> ({t['prob']:.0%})"
+            f"  <b>{state.local(t['kickoff']).strftime('%H:%M')} {t['match']}</b>\n     ➡️ {tip(t['label'])}"
+            f" <b>({t['prob']:.0%})</b>"
             f" · Sporttip mind. <b>{1 / t['prob']:.2f}</b>"
             for t in sorted(rest.values(), key=lambda t: t["kickoff"]))
     if upcoming:

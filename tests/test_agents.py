@@ -84,11 +84,12 @@ def test_apply_agents_replaces_struck_leg(engine, fixture_bytes, bundesliga, mon
 
 def test_budget_stops_agents(engine, fixture_bytes, bundesliga, monkeypatch):
     monkeypatch.setattr(runner, "fatigue_context", lambda e, mid: "ctx")
-    monkeypatch.setenv("AGENT_DAILY_BUDGET_USD", "0.25")
+    monkeypatch.setenv("AGENT_DAILY_BUDGET_USD", "0.5")
+    monkeypatch.setenv("AGENT_MAX_COST_PER_MATCH", "0.25")
     plan = _plan_with_matches(engine, fixture_bytes, bundesliga)
     legs = plan.day_combos[0]["legs"]
     out = runner.analyze_legs(engine, legs, client=FakeClient({}))
-    assert 1 <= len(out) < len(legs)  # nach ~0.23 USD pro Spiel ist das Budget erschöpft
+    assert 1 <= len(out) < len(legs)  # nächstes Spiel (bis 0.25 $) passt nicht mehr ins Limit
     with session_scope(engine) as s:
         assert s.execute(select(AgentReport)).first() is not None
 
@@ -171,3 +172,16 @@ def test_scout_checks_krass_combo_and_replaces_struck(engine, fixture_bytes, bun
     assert len(res) == 5
     legs = plan.krass_combos[0]["legs"]
     assert struck not in {l["match"] for l in legs} and len(legs) == 5 and plan.krass_combos[0]["krass"]
+
+
+def test_costs_include_screenshots_and_stop_below_limit(engine, fixture_bytes, bundesliga, monkeypatch):
+    monkeypatch.setattr(runner, "fatigue_context", lambda e, mid: "ctx")
+    monkeypatch.setenv("AGENT_DAILY_BUDGET_USD", "1.0")
+    runner.add_other_cost(engine, 0.04)
+    runner.add_other_cost(engine, 0.03)
+    assert runner.other_costs_today(engine)["n"] == 2
+    plan = _plan_with_matches(engine, fixture_bytes, bundesliga)
+    runner.analyze_legs(engine, plan.day_combos[0]["legs"], client=FakeClient({}))
+    assert runner.spent_today(engine) <= 1.0  # Limit wird nie überschritten
+    text = runner.cost_summary(engine)
+    assert "Screenshots: 2" in text and "von 1.00 $" in text

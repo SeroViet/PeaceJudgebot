@@ -336,6 +336,7 @@ COMMANDS = [
     ("risiko", "Risiko-Kombi: 3 Spiele mit höherer Quote"),
     ("krass", "Krass-Kombi: 5 Spiele, Quote ca. 8–12"),
     ("sporttip", "Sporttip-Quoten prüfen: /sporttip T1 1.30 1.25 …"),
+    ("kosten", "Claude-Kosten heute"),
     ("sicher", "Tipps mit hoher Trefferquote"),
     ("heute", "Value-Tipps und Sicher-Tipps"),
     ("analyse", "Agenten-Analyse: /analyse Team"),
@@ -385,7 +386,7 @@ def build(engine) -> Application | None:
                             "/sporttip T1 Quoten – Sporttip-Quoten prüfen\n"
                             "📸 Screenshot vom Sporttip-Schein schicken – ich prüfe die Quoten\n"
                             "/sicher – Tipps mit hoher Trefferquote (Über/Unter, 1X …)\n"
-                            "/bilanz – Bilanz\n/gesetzt Nr Einsatz Quote – Wette erfassen (z. B. /gesetzt S3 10 1.45)\n"
+                            "/kosten – Claude-Kosten heute\n/bilanz – Bilanz\n/gesetzt Nr Einsatz Quote – Wette erfassen (z. B. /gesetzt S3 10 1.45)\n"
                             "/update – neu berechnen")
 
     async def cmd_today(update: Update, _ctx):
@@ -467,6 +468,11 @@ def build(engine) -> Application | None:
         await reply(update, format_day_combos({**plan, "day_combos": combos}, max_days=2) if combos
                     else "Keine Krass-Kombi möglich (zu wenige Spiele mit 55–70 % an einem Tag).")
 
+    async def cmd_costs(update: Update, _ctx):
+        from fussball.agents import runner
+
+        await reply(update, runner.cost_summary(engine))
+
     async def cmd_sporttip(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         try:
             combo_id, quotes = ctx.args[0], [float(a.replace(",", ".")) for a in ctx.args[1:]]
@@ -496,7 +502,12 @@ def build(engine) -> Application | None:
             forecasts = service.market_forecasts(engine, hours=96)
             listing = [f"{f.match_id}: {f.home} – {f.away} ({state.local(f.kickoff_utc):%d.%m. %H:%M})"
                        for f in forecasts]
-            data, _cost = slip.read_slip(client, image, media, listing)
+            from fussball.agents import runner
+
+            if runner.spent_today(engine) >= runner.daily_budget():
+                raise RuntimeError("Tageslimit für Claude erreicht – morgen wieder (siehe /kosten)")
+            data, cost = slip.read_slip(client, image, media, listing)
+            runner.add_other_cost(engine, cost)
             rows = slip.evaluate(data, forecasts)
             return data, rows, slip.remember(engine, rows)
 
@@ -526,7 +537,7 @@ def build(engine) -> Application | None:
     app.add_handler(CommandHandler("start", cmd_start))
     for name, fn in (("heute", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update),
-                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass)):
+                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("kosten", cmd_costs)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     app.add_handler(MessageHandler((filters.PHOTO | filters.Document.IMAGE) & only_owner, on_photo))
     return app

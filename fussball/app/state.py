@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import logging
 import threading
 from datetime import datetime
@@ -97,8 +98,11 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
             log.exception("Agenten fehlgeschlagen")
         for kind, attr in (("risky", "risky_combos"), ("krass", "krass_combos")):
             setattr(plan, attr, service.build_extra_combos(plan, kind))
+            # AGENT_COMBOS: welche Zusatz-Kombis der Scout prüft (R = Risiko, X = Krass); die Tageskombi immer
+            scope = os.getenv("AGENT_COMBOS", "R,X").upper()
+            checked = agents and ("R" if kind == "risky" else "X") in scope
             try:
-                info["agent"] += service.apply_agents_risky(engine, plan, cached_only=not agents, kind=kind)
+                info["agent"] += service.apply_agents_risky(engine, plan, cached_only=not checked, kind=kind)
             except Exception:  # noqa: BLE001
                 log.exception("Agenten (%s) fehlgeschlagen", kind)
         books = plan.config.get("bookmakers") or None

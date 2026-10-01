@@ -21,11 +21,46 @@ def daily_budget() -> float:
 
 
 def spent_today(engine: Engine) -> float:
+    """Alle Claude-Kosten von heute (UTC): Scout-Berichte + gelesene Screenshots."""
     today = utcnow().date()
     with session_scope(engine) as s:
         rows = s.scalars(select(AgentReport.cost_usd).where(
             AgentReport.created_at >= datetime.combine(today, datetime.min.time()))).all()
-    return float(sum(rows))
+    return float(sum(rows)) + other_costs_today(engine)["usd"]
+
+
+def other_costs_today(engine: Engine) -> dict:
+    with session_scope(engine) as s:
+        row = s.get(AppSetting, "claude_other_costs")
+        v = dict(row.value) if row and isinstance(row.value, dict) else {}
+    return v if v.get("day") == utcnow().date().isoformat() else {"day": utcnow().date().isoformat(), "usd": 0.0, "n": 0}
+
+
+def add_other_cost(engine: Engine, usd: float) -> None:
+    """Kosten ausserhalb des Scouts (z. B. Screenshot lesen) dem Tageszähler hinzufügen."""
+    v = other_costs_today(engine)
+    v.update(usd=v["usd"] + usd, n=v["n"] + 1)
+    with session_scope(engine) as s:
+        row = s.get(AppSetting, "claude_other_costs")
+        if row:
+            row.value = v
+        else:
+            s.add(AppSetting(key="claude_other_costs", value=v))
+
+
+def cost_summary(engine: Engine) -> str:
+    today = utcnow().date()
+    with session_scope(engine) as s:
+        scout = s.scalars(select(AgentReport.cost_usd).where(
+            AgentReport.created_at >= datetime.combine(today, datetime.min.time()))).all()
+    other = other_costs_today(engine)
+    total = float(sum(scout)) + other["usd"]
+    return (f"🤖 <b>Claude-Kosten heute</b>\n"
+            f"Scout: {len(scout)} Spiele · {sum(scout):.2f} $\n"
+            f"Screenshots: {other['n']} · {other['usd']:.2f} $\n"
+            f"<b>Total {total:.2f} $ von {daily_budget():.2f} $ Tageslimit</b>\n"
+            f"<i>Zähler startet nach einem Neustart des Servers neu – das Monatslimit bei Anthropic ist die "
+            f"sichere Grenze.</i>")
 
 
 def fatigue_context(engine: Engine, match_id: int) -> str:
@@ -83,7 +118,8 @@ def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float
             continue
         if cached_only:
             continue
-        if spent_today(engine) >= daily_budget():
+        # nie über das Limit: vorher prüfen, ob ein weiteres Spiel (höchstens ~0.50 $) noch hineinpasst
+        if spent_today(engine) + float(os.getenv("AGENT_MAX_COST_PER_MATCH", "0.5")) > daily_budget():
             log.warning("Agenten-Tagesbudget erreicht (%.2f USD)", daily_budget())
             break
         kickoff = local_time(leg["kickoff"]) if local_time else leg["kickoff"]

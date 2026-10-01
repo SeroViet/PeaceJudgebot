@@ -146,6 +146,10 @@ async def _daily_loop(engine=None):
             await asyncio.sleep(30)
         plan = state.load_plan()
         await telegram_bot.notify(_bot, "☀️ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))
+        if engine is not None:
+            from fussball.agents import runner
+
+            await telegram_bot.notify(_bot, runner.cost_summary(engine))
         await asyncio.sleep(60)
 
 

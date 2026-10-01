@@ -599,26 +599,43 @@ def risky_combos(forecasts: list[MatchForecast], safe_combos: list[dict], size: 
     return out
 
 
+def build_extra_combos(plan: "DailyPlan", kind: str, skip: set[int] | None = None) -> list[dict]:
+    """Risiko- (kind='risky') oder Krass-Kombi (kind='krass') aus den Prognosen des Plans."""
+    pool = plan.all_forecasts or plan.forecasts
+    if kind == "risky":
+        rc = plan.config.get("risky_combo", {})
+        return risky_combos(pool, plan.day_combos, rc.get("size", 3), rc.get("min_prob", 0.60),
+                            rc.get("max_prob", 0.72), skip=skip)
+    kc = plan.config.get("krass_combo", {})
+    return [{**c, "krass": True} for c in risky_combos(
+        pool, plan.day_combos + plan.risky_combos, kc.get("size", 5), kc.get("min_prob", 0.55),
+        kc.get("max_prob", 0.70), skip=skip, markets=KRASS_MARKETS)]
+
+
 def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,
-                       cached_only: bool = False) -> list[dict]:
-    """Scout prüft die Risiko-Kombi des nächsten Tages; gestrichene Spiele werden ersetzt (eine Runde)."""
+                       cached_only: bool = False, kind: str = "risky") -> list[dict]:
+    """Scout prüft die Risiko- bzw. Krass-Kombi des nächsten Tages. Gestrichene Spiele werden ersetzt,
+    Spiele mit „vorsicht“ ebenfalls, solange danach noch eine Kombi für den Tag zustande kommt (eine Runde)."""
     from fussball.agents import runner
     from fussball.app.state import local
 
+    attr = "risky_combos" if kind == "risky" else "krass_combos"
     now = utcnow()
-    soon = [c for c in plan.risky_combos
+    soon = [c for c in getattr(plan, attr)
             if now < datetime.fromisoformat(c["legs"][0]["kickoff"]) <= now + timedelta(hours=horizon_h)]
     if not soon:
         return []
+    day = soon[0]["day"]
     res = {r["match_id"]: r for r in runner.analyze_legs(engine, soon[0]["legs"], client=client, local_time=local,
                                                          cached_only=cached_only)}
     struck = {mid for mid, r in res.items() if r["assessment"] == "streichen"}
-    if struck:
-        rc = plan.config.get("risky_combo", {})
-        plan.risky_combos = risky_combos(plan.all_forecasts or plan.forecasts, plan.day_combos,
-                                         rc.get("size", 3), rc.get("min_prob", 0.60), rc.get("max_prob", 0.72),
-                                         skip=struck)
-    for c in plan.risky_combos:
+    risky = {mid for mid, r in res.items() if r["assessment"] == "vorsicht"}
+    if struck or risky:
+        combos = build_extra_combos(plan, kind, skip=struck | risky)
+        if not any(c["day"] == day for c in combos):
+            combos = build_extra_combos(plan, kind, skip=struck)
+        setattr(plan, attr, combos)
+    for c in getattr(plan, attr):
         for leg in c["legs"]:
             if leg["match_id"] in res:
                 leg["agent"] = {k: res[leg["match_id"]][k] for k in ("assessment", "reason")}

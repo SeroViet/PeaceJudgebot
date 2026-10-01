@@ -94,7 +94,7 @@ DAY_BT = {"3": "geht an ca. 6 von 10 Tagen auf (hochgerechnet aus 83 % pro Tipp)
 # Einsatz-Empfehlung in % der eigenen Wettkasse: je unsicherer, desto kleiner
 STAKE_PCT = {"3": 2.0, "5": 1.0, "6": 1.0, "risky": 0.5, "krass": 0.25}
 KRASS_BT = ("Krass: Tipps dieser Art im Backtest ca. 64 % richtig – die ganze Kombi geht nur etwa an "
-            "1 von 10 Tagen auf. Nicht vom Scout geprüft. Nur Mini-Einsatz.")
+            "1 von 10 Tagen auf. Nur Mini-Einsatz.")
 RISKY_BT = "Risiko: Einzeltipps dieser Art im Backtest ca. 65 % richtig. Nur kleiner Einsatz."
 
 

@@ -43,6 +43,10 @@ class TeamIntel(BaseModel):
     lineup_confirmed: bool = Field(description="True nur, wenn die offizielle Aufstellung schon veröffentlicht ist")
     expected_lineup: list[str] = Field(description="Voraussichtliche oder offizielle Startelf (bis zu 11 Namen)")
     formation: str | None
+    goalkeeper: str = Field(default="", description="Wer steht im Tor: Stammtorhüter oder Ersatz (mit Namen); "
+                                                    "fehlt der Stammtorhüter, unbedingt erwähnen")
+    top_players: str = Field(default="", description="Leistungsträger auf dem Platz: wie viele der wichtigsten "
+                                                     "Spieler (Torjäger, Spielmacher, Abwehrchef) spielen, wer fehlt")
     fatigue: str = Field(description="Belastung: Spiele in den letzten Tagen, Reisen, Europapokal, Rotation")
     motivation: str = Field(description="Tabellensituation, Bedeutung des Spiels, Trainerlage")
 
@@ -73,6 +77,9 @@ Recherchiere mit der Websuche aktuelle, verlässliche Informationen zum genannte
 - Verletzte, fragliche und gesperrte Spieler beider Teams (Rote Karte, Gelbsperre), mit Position
   und ob es Stammspieler sind
 - Spieler, die mit der nächsten Gelben Karte gesperrt wären
+- Torhüter: spielt der Stammtorhüter oder ein Ersatz (verletzt, gesperrt, Rotation)?
+- Leistungsträger: wie viele der wichtigsten Spieler (Torjäger, Spielmacher, Abwehrchef, Kapitän)
+  stehen auf dem Platz, wer fehlt
 - Offizielle Aufstellung, falls schon veröffentlicht (ca. 1 Stunde vor Anpfiff), sonst die
   voraussichtliche Startelf und Formation aus seriösen Vorschauen
 - Belastung/Müdigkeit: Spiele in den letzten 7-14 Tagen (inkl. Europapokal, Pokal, Länderspiele),
@@ -190,6 +197,10 @@ def format_intel(match: str, tip: str, intel: MatchIntel) -> str:
             lines.append("Gelbsperre droht: " + ", ".join(t.yellow_card_risk))
         if t.expected_lineup:
             lines.append("Elf: " + ", ".join(t.expected_lineup[:11]))
+        if t.goalkeeper:
+            lines.append(f"🧤 Tor: {t.goalkeeper}")
+        if t.top_players:
+            lines.append(f"⭐ Leistungsträger: {t.top_players}")
         lines.append(f"Belastung: {t.fatigue}")
     if intel.goal_trend:
         lines.append(f"\n⚽ Tore: {intel.goal_trend}")

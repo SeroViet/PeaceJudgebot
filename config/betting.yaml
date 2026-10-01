@@ -40,7 +40,7 @@ risky_combo:
   min_prob: 0.60
   max_prob: 0.72
 
-# Krass-Kombi: 5 Spiele mit 55–70 % → Quote ca. 8–12, geht etwa an 1 von 10 Tagen auf (nicht vom Scout geprüft)
+# Krass-Kombi: 5 Spiele mit 55–70 % → Quote ca. 8–12, geht etwa an 1 von 10 Tagen auf (Scout prüft mit)
 krass_combo:
   size: 5
   min_prob: 0.55

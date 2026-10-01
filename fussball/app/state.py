@@ -95,17 +95,12 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
             info["agent"] = service.apply_agents(engine, plan, cached_only=not agents)
         except Exception:  # noqa: BLE001 – ohne Agenten weiterarbeiten
             log.exception("Agenten fehlgeschlagen")
-        rc = plan.config.get("risky_combo", {})
-        plan.risky_combos = service.risky_combos(plan.all_forecasts or plan.forecasts, plan.day_combos,
-                                                 rc.get("size", 3), rc.get("min_prob", 0.60), rc.get("max_prob", 0.72))
-        try:
-            info["agent"] += service.apply_agents_risky(engine, plan, cached_only=not agents)
-        except Exception:  # noqa: BLE001
-            log.exception("Agenten (Risiko-Kombi) fehlgeschlagen")
-        kc = plan.config.get("krass_combo", {})
-        plan.krass_combos = [{**c, "krass": True} for c in service.risky_combos(
-            plan.all_forecasts or plan.forecasts, plan.day_combos + plan.risky_combos, kc.get("size", 5),
-            kc.get("min_prob", 0.55), kc.get("max_prob", 0.70), markets=service.KRASS_MARKETS)]
+        for kind, attr in (("risky", "risky_combos"), ("krass", "krass_combos")):
+            setattr(plan, attr, service.build_extra_combos(plan, kind))
+            try:
+                info["agent"] += service.apply_agents_risky(engine, plan, cached_only=not agents, kind=kind)
+            except Exception:  # noqa: BLE001
+                log.exception("Agenten (%s) fehlgeschlagen", kind)
         books = plan.config.get("bookmakers") or None
         for combos in (plan.day_combos, plan.risky_combos, plan.krass_combos):
             service.attach_book_odds(engine, combos, books)

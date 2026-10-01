@@ -159,3 +159,15 @@ def test_cached_only_never_calls_claude(engine, fixture_bytes, bundesliga, monke
     paid = client.calls
     again = service.apply_agents(engine, plan, client=client, cached_only=True)
     assert client.calls == paid and again and all(r["cached"] for r in again)
+
+
+def test_scout_checks_krass_combo_and_replaces_struck(engine, fixture_bytes, bundesliga, monkeypatch):
+    monkeypatch.setattr(runner, "fatigue_context", lambda e, mid: "ctx")
+    plan = _plan_with_matches(engine, fixture_bytes, bundesliga, n=7)
+    plan.krass_combos = service.build_extra_combos(plan, "krass")
+    assert plan.krass_combos and plan.krass_combos[0]["krass"]
+    struck = plan.krass_combos[0]["legs"][0]["match"]
+    res = service.apply_agents_risky(engine, plan, client=FakeClient({struck: "streichen"}), kind="krass")
+    assert len(res) == 5
+    legs = plan.krass_combos[0]["legs"]
+    assert struck not in {l["match"] for l in legs} and len(legs) == 5 and plan.krass_combos[0]["krass"]

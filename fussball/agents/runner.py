@@ -16,6 +16,12 @@ from fussball.data.schema import AgentReport, AppSetting, Match, Team, utcnow
 log = logging.getLogger(__name__)
 
 
+def max_cost_per_match() -> float:
+    """Reserve vor jedem neu recherchierten Spiel (höchstens so viel kostet eines): Opus ~0.50 $, Sonnet ~0.30 $."""
+    default = "0.3" if "sonnet" in scout.MODEL else "0.5"
+    return float(os.getenv("AGENT_MAX_COST_PER_MATCH", default))
+
+
 def daily_budget() -> float:
     return float(os.getenv("AGENT_DAILY_BUDGET_USD", "1.5"))
 
@@ -162,7 +168,7 @@ def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float
         if cached_only:
             continue
         # nie über das Limit: vorher prüfen, ob ein weiteres Spiel (höchstens ~0.50 $) noch hineinpasst
-        if spent_today(engine) + float(os.getenv("AGENT_MAX_COST_PER_MATCH", "0.5")) > daily_budget():
+        if spent_today(engine) + max_cost_per_match() > daily_budget():
             log.warning("Agenten-Tagesbudget erreicht (%.2f USD)", daily_budget())
             break
         kickoff = local_time(leg["kickoff"]) if local_time else leg["kickoff"]
@@ -203,7 +209,7 @@ def check_tips(engine: Engine, items: list[dict], client=None, local_time=None, 
             continue
         if it.get("match_id") is None:
             # Spiel nicht in unseren Daten: trotzdem über die Teamnamen recherchieren (ohne Speicher)
-            if spent_today(engine) + float(os.getenv("AGENT_MAX_COST_PER_MATCH", "0.5")) > daily_budget():
+            if spent_today(engine) + max_cost_per_match() > daily_budget():
                 res["reason"] = "Tageslimit erreicht – morgen wieder"
             else:
                 try:

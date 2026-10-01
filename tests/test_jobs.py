@@ -79,3 +79,11 @@ def test_today_without_combo_lists_remaining_games():
                                         "label": "Über 1.5 Tore", "prob": 0.8}]}
     text = telegram_bot.format_today(plan)
     assert "Heute noch als Einzeltipps" in text and "Lyon – Chelsea" in text and "1.25" in text
+
+
+def test_long_messages_split_at_paragraphs():
+    blocks = [f"<b>Kombi {i}</b>\n" + "x" * 900 for i in range(10)]
+    parts = telegram_bot.chunks("\n\n".join(blocks))
+    assert len(parts) > 1 and all(len(p) <= 3900 for p in parts)
+    assert all(p.count("<b>") == p.count("</b>") for p in parts)  # kein Tag zerschnitten
+    assert "".join(parts).replace("\n", "") == "".join(blocks).replace("\n", "")

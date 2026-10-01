@@ -215,10 +215,21 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
     combos = plan.get("day_combos", [])
     if not combos:
         return "Keine Tageskombi möglich (zu wenige Spiele mit Pinnacle-Quoten an einem Tag)."
+    from fussball.service import CATEGORIES
+
     days = sorted({c["day"] for c in combos})[:max_days]
+    order = list(CATEGORIES)
+    kind = lambda c: 2 if c.get("krass") else 1 if c.get("risky") else 0  # noqa: E731
     out = []
     for day in days:
-        for c in [c for c in combos if c["day"] == day]:
+        day_combos = sorted([c for c in combos if c["day"] == day],
+                            key=lambda c: (order.index(c.get("cat", "liga")), kind(c), c["size"]))
+        shown_cat = None
+        for c in day_combos:
+            cat = c.get("cat", "liga")
+            if cat != shown_cat and len({x.get("cat", "liga") for x in combos}) > 1:
+                out.append(f"━━━━━━━━━━━━━━━\n<b>{CATEGORIES[cat]}</b>")
+                shown_cat = cat
             d = _fmt_day(c["legs"][0]["kickoff"])
             icon = {"bestätigt": " ✅", "vorsicht": " ⚠️", "streichen": " ❌"}
             legs = "\n".join(f"  {i}. <b>{state.local(l['kickoff']).strftime('%H:%M')} {l['match']}</b>"
@@ -268,11 +279,14 @@ def format_today(plan: dict) -> str:
     from datetime import datetime
 
     today = datetime.now(state.TZ).date().isoformat()
+    every = [c for k in ("day_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) if c["day"] == today]
+    if any(c["day"] == today for c in plan.get("day_combos", [])):
+        # Alle Kombis von heute, nach Wettbewerbs-Art getrennt (Frauen, Nationalteams, Europapokal, Ligen)
+        return format_day_combos({**plan, "day_combos": every}, max_days=1)
     text = _format_today_safe(plan, today)
-    for key in ("risky_combos", "krass_combos"):
-        extra = [c for c in plan.get(key, []) if c["day"] == today]
-        if extra:
-            text += "\n\n" + format_day_combos({**plan, "day_combos": extra}, max_days=1)
+    extra = [c for c in every if c.get("risky") or c.get("krass")]
+    if extra:
+        text += "\n\n" + format_day_combos({**plan, "day_combos": extra}, max_days=1)
     return text
 
 
@@ -391,7 +405,7 @@ def build(engine) -> Application | None:
     only_owner = filters.User(user_id=owner) if owner else filters.User(user_id=[])
 
     async def reply(update: Update, text: str):
-        for chunk in [text[i : i + 3900] for i in range(0, len(text), 3900)] or [""]:
+        for chunk in chunks(text) or [""]:
             await update.effective_message.reply_text(chunk, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
     async def cmd_id(update: Update, _ctx):
@@ -570,12 +584,28 @@ def build(engine) -> Application | None:
     return app
 
 
+def chunks(text: str, limit: int = 3900) -> list[str]:
+    """Lange Nachrichten an Absätzen (dann Zeilen) teilen – nie mitten in einem HTML-Tag."""
+    out, cur = [], ""
+    for block in text.split("\n\n"):
+        pieces = [block] if len(block) <= limit else block.split("\n")
+        for piece in pieces:
+            sep = "\n\n" if piece is block else "\n"
+            if cur and len(cur) + len(sep) + len(piece) > limit:
+                out.append(cur)
+                cur = ""
+            cur = f"{cur}{sep}{piece}" if cur else piece
+    if cur:
+        out.append(cur)
+    return out
+
+
 async def notify(app: Application | None, text: str) -> None:
     owner = owner_id()
     if app is None or owner is None or not text:
         return
     try:
-        for chunk in [text[i : i + 3900] for i in range(0, len(text), 3900)]:
+        for chunk in chunks(text):
             await app.bot.send_message(owner, chunk, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     except Exception:  # noqa: BLE001
         log.exception("Telegram-Nachricht fehlgeschlagen")

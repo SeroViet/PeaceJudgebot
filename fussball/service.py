@@ -436,6 +436,28 @@ def safe_tips(forecasts: list[MatchForecast], min_prob: float = 0.70, max_prob: 
     return out
 
 
+# Wettbewerbs-Arten: Kombis werden nie gemischt (Frauen, Nationalteams, Europapokal, Ligen je für sich)
+CATEGORIES = {"frauen": "👩 Frauenfussball", "national": "🌍 Nationalteams (Nations League, WM, EM, Länderspiele)",
+              "europa": "🏆 Europapokal (Champions League, Europa League, Conference League)", "liga": "⚽ Ligen"}
+_WOMEN = ("women", "frauen", "femin", "wsl", "nwsl", "liga_f", "damallsvenskan", "toppserien")
+_NATIONAL = ("nations_league", "world_cup", "fifa_world", "uefa_euro_qual", "euro_qual", "uefa_euro",
+             "copa_america", "africa_cup", "asian_cup", "gold_cup", "friendl", "international", "olympic")
+_CUPS = ("champs_league", "champions_league", "europa_league", "conference_league", "libertadores",
+         "sudamericana", "club_world_cup", "supercup", "super_cup")
+
+
+def category(comp: str, comp_name: str | None = None) -> str:
+    """frauen | national | europa | liga – aus dem Wettbewerbs-Code (z. B. Odds-API-Key) und Namen."""
+    text = f"{comp} {comp_name or ''}".lower().replace(" ", "_").replace("-", "_")
+    if any(w in text for w in _WOMEN):
+        return "frauen"
+    if any(w in text for w in _CUPS):
+        return "europa"
+    if any(w in text for w in _NATIONAL):
+        return "national"
+    return "liga"
+
+
 # Teamtore ("Bayern trifft", "Bayern über 1.5 Tore") sind im Backtest im Bereich 70–88 % genauso gut
 # kalibriert wie Über/Unter gesamt und bringen Abwechslung in die Kombi.
 COMBO_MARKETS = ("1X2", "DC", "OU1.5", "OU2.5", "OU3.5", "BTTS", "HOME0.5", "AWAY0.5", "HOME1.5", "AWAY1.5")
@@ -504,26 +526,27 @@ def day_combos(forecasts: list[MatchForecast], sizes=(3, 5), min_prob: float = 0
 
     zone = ZoneInfo(tz)
     bands = [(min_prob, max_prob), *(WIDER_BANDS if widen else ())]
-    per_band: list[dict[str, list[dict]]] = []
+    per_band: list[dict[tuple, list[dict]]] = []
     for lo, hi in bands:
-        by_day: dict[str, list[dict]] = {}
+        by_day: dict[tuple, list[dict]] = {}
         for t in best_tip_per_match(forecasts, lo, hi):
             day = datetime.fromisoformat(t["kickoff"]).replace(tzinfo=ZoneInfo("UTC")).astimezone(zone).date().isoformat()
-            by_day.setdefault(day, []).append(t)
+            by_day.setdefault((day, category(t["comp"], t.get("comp_name"))), []).append(t)
         per_band.append(by_day)
     out = []
-    for day in sorted({d for b in per_band for d in b}):
-        band = next((i for i, b in enumerate(per_band) if len(b.get(day, [])) >= min(sizes)), None)
+    for key in sorted({k for b in per_band for k in b}, key=lambda k: (k[0], list(CATEGORIES).index(k[1]))):
+        day, cat = key
+        band = next((i for i, b in enumerate(per_band) if len(b.get(key, [])) >= min(sizes)), None)
         if band is None:
             continue
-        legs = sorted(per_band[band][day], key=lambda t: -t["prob"])
+        legs = sorted(per_band[band][key], key=lambda t: -t["prob"])
         for n in sizes:
             if len(legs) < n:
                 continue
             chosen = sorted(_varied(legs, n), key=lambda t: t["kickoff"])
             prob = float(np.prod([t["prob"] for t in chosen]))
             out.append({"day": day, "size": n, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
-                        "leg_min": min(t["prob"] for t in chosen), "widened": band > 0})
+                        "leg_min": min(t["prob"] for t in chosen), "widened": band > 0, "cat": cat})
     return out
 
 
@@ -584,18 +607,18 @@ def risky_combos(forecasts: list[MatchForecast], safe_combos: list[dict], size: 
     for t in best_tip_per_match([f for f in forecasts if f.match_id not in (skip or set())], min_prob, max_prob,
                                 markets, exclude=RISKY_EXCLUDED):
         day = datetime.fromisoformat(t["kickoff"]).replace(tzinfo=ZoneInfo("UTC")).astimezone(zone).date().isoformat()
-        by_day.setdefault(day, []).append(t)
+        by_day.setdefault((day, category(t["comp"], t.get("comp_name"))), []).append(t)
     out = []
-    for day in sorted(by_day):
+    for (day, cat) in sorted(by_day, key=lambda k: (k[0], list(CATEGORIES).index(k[1]))):
         # Spiele, die nicht in der sicheren Kombi stehen, zuerst; reicht das nicht, auch diese
-        legs = sorted(by_day[day], key=lambda t: (t["match_id"] in used.get(day, set()),
-                                                  -(t["prob"] + (GOAL_BONUS if _is_goal_market(t["market"]) else 0))))
+        legs = sorted(by_day[(day, cat)], key=lambda t: (t["match_id"] in used.get(day, set()),
+                                                         -(t["prob"] + (GOAL_BONUS if _is_goal_market(t["market"]) else 0))))
         if len(legs) < size:
             continue
         chosen = sorted(_varied(legs, size), key=lambda t: t["kickoff"])
         prob = float(np.prod([t["prob"] for t in chosen]))
         out.append({"day": day, "size": size, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
-                    "leg_min": min(t["prob"] for t in chosen), "risky": True})
+                    "leg_min": min(t["prob"] for t in chosen), "risky": True, "cat": cat})
     return out
 
 
@@ -637,18 +660,24 @@ def builder_combos(forecasts: list[MatchForecast], used_combos: list[dict], n: i
     by_day: dict[str, list[dict]] = {}
     for t in builder_legs(forecasts, min_prob, max_prob, skip):
         day = datetime.fromisoformat(t["kickoff"]).replace(tzinfo=ZoneInfo("UTC")).astimezone(zone).date().isoformat()
-        by_day.setdefault(day, []).append(t)
+        by_day.setdefault((day, category(t["comp"], t.get("comp_name"))), []).append(t)
     out = []
-    for day in sorted(by_day):
-        legs = sorted(by_day[day], key=lambda t: (t["match_id"] in used.get(day, set()), -t["lift"] * t["prob"]))
+    for (day, cat) in sorted(by_day, key=lambda k: (k[0], list(CATEGORIES).index(k[1]))):
+        legs = sorted(by_day[(day, cat)], key=lambda t: (t["match_id"] in used.get(day, set()), -t["lift"] * t["prob"]))
         if len(legs) < n:
             continue
         chosen = sorted(legs[:n], key=lambda t: t["kickoff"])
         prob = float(np.prod([t["prob"] for t in chosen]))
         out.append({"day": day, "size": n, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
                     "naive_odds": float(np.prod([t["naive_odds"] for t in chosen])),
-                    "leg_min": min(t["prob"] for t in chosen), "builder": True})
+                    "leg_min": min(t["prob"] for t in chosen), "builder": True, "cat": cat})
     return out
+
+
+def _covers(new: list[dict], old: list[dict], day: str) -> bool:
+    """Gibt es nach dem Ersetzen für den Tag noch jede Wettbewerbs-Art, die es vorher gab?"""
+    cats = lambda cs: {c.get("cat") for c in cs if c["day"] == day}  # noqa: E731
+    return cats(new) >= cats(old)
 
 
 def build_extra_combos(plan: "DailyPlan", kind: str, skip: set[int] | None = None) -> list[dict]:
@@ -679,13 +708,15 @@ def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h
     if not soon:
         return []
     day = soon[0]["day"]
-    res = {r["match_id"]: r for r in runner.analyze_legs(engine, soon[0]["legs"], client=client, local_time=local,
+    before = getattr(plan, attr)
+    legs = list({l["match_id"]: l for c in before if c["day"] == day for l in c["legs"]}.values())
+    res = {r["match_id"]: r for r in runner.analyze_legs(engine, legs, client=client, local_time=local,
                                                          cached_only=cached_only)}
     struck = {mid for mid, r in res.items() if r["assessment"] == "streichen"}
     risky = {mid for mid, r in res.items() if r["assessment"] == "vorsicht"}
     if struck or risky:
         combos = build_extra_combos(plan, kind, skip=struck | risky)
-        if not any(c["day"] == day for c in combos):
+        if not _covers(combos, before, day):
             combos = build_extra_combos(plan, kind, skip=struck)
         setattr(plan, attr, combos)
     for c in getattr(plan, attr):
@@ -731,7 +762,7 @@ def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: floa
         # ⚠️-Spiele nur ersetzen, wenn es danach trotzdem eine Kombi für den Tag gibt
         target = struck | risky
         combos = rebuild(target)
-        if not any(c["day"] == day for c in combos):
+        if not _covers(combos, plan.day_combos, day):
             target, combos = struck, rebuild(struck)
         if target == excluded:
             break
@@ -758,9 +789,9 @@ def record_served(engine: Engine, combos: list[dict]) -> None:
         row = s.get(AppSetting, "served_combos")
         hist = dict(row.value) if row and isinstance(row.value, dict) else {}
         for c in combos:
-            key = f"{c['day']}_{c['size']}"
+            key = f"{c['day']}_{c.get('cat', 'liga')}_{c['size']}"
             if key not in hist:
-                hist[key] = {"day": c["day"], "size": c["size"], "fair_odds": c["fair_odds"], "prob": c["prob"],
+                hist[key] = {"day": c["day"], "size": c["size"], "cat": c.get("cat", "liga"), "fair_odds": c["fair_odds"], "prob": c["prob"],
                              "legs": [{k: l[k] for k in ("match_id", "match", "market", "selection", "label")}
                                       for l in c["legs"]], "done": False}
         if row:

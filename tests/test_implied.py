@@ -140,3 +140,23 @@ def test_krass_combo_high_odds():
     assert c["size"] == 5 and c["fair_odds"] > 8
     labels = [l["label"] for l in c["legs"]]
     assert "Über 1.5 Tore" not in labels and labels.count("Über 2.5 Tore") <= 3
+
+
+def test_categories_never_mixed():
+    from fussball.service import category, day_combos
+
+    assert category("soccer_uefa_champs_league_women", "UEFA Champions League Women") == "frauen"
+    assert category("soccer_uefa_nations_league", "UEFA Nations League") == "national"
+    assert category("soccer_fifa_world_cup_qualifiers_europe") == "national"
+    assert category("soccer_uefa_champs_league", "UEFA Champions League") == "europa"
+    assert category("soccer_uefa_europa_league") == "europa"
+    assert category("D1", "Bundesliga") == "liga" and category("soccer_usa_mls", "MLS") == "liga"
+    fs = []
+    for i, (code, name) in enumerate([("soccer_uefa_nations_league", "UEFA Nations League")] * 3
+                                     + [("soccer_uefa_champs_league_women", "UEFA Champions League Women")] * 3):
+        fs.append(MatchForecast(i, code, name, datetime(2026, 10, 10, 12 + i, 0), f"H{i}", f"A{i}", 1.5, 1.0, {}, {},
+                                {}, None, None, 0.0, {}, implied={"OU1.5": {"O": 0.82, "U": 0.18}}))
+    combos = day_combos(fs, sizes=(3,))
+    assert {c["cat"] for c in combos} == {"national", "frauen"}
+    for c in combos:
+        assert len({category(l["comp"], l["comp_name"]) for l in c["legs"]}) == 1  # nie gemischt

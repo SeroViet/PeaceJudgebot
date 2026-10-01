@@ -197,8 +197,24 @@ def check_tips(engine: Engine, items: list[dict], client=None, local_time=None, 
     out = []
     for it in items:
         res = {"assessment": None, "reason": ""}
-        if client is None or it.get("match_id") is None:
-            res["reason"] = "Spiel nicht in unseren Daten – keine Recherche möglich"
+        if client is None:
+            res["reason"] = "Agenten nicht aktiv (ANTHROPIC_API_KEY fehlt)"
+            out.append(res)
+            continue
+        if it.get("match_id") is None:
+            # Spiel nicht in unseren Daten: trotzdem über die Teamnamen recherchieren (ohne Speicher)
+            if spent_today(engine) + float(os.getenv("AGENT_MAX_COST_PER_MATCH", "0.5")) > daily_budget():
+                res["reason"] = "Tageslimit erreicht – morgen wieder"
+            else:
+                try:
+                    r = scout.scout_match(client, it["match"], it.get("kickoff") or "heute/demnächst",
+                                          it.get("comp") or "", it["label"], "Keine Daten aus unserer Datenbank.",
+                                          max_searches=int(os.getenv("AGENT_MAX_SEARCHES", "4")))
+                    add_other_cost(engine, r.cost_usd)
+                    res.update(assessment=r.intel.tip_assessment, reason=r.intel.tip_reason)
+                except Exception as exc:  # noqa: BLE001
+                    log.exception("Recherche ohne Spiel-ID fehlgeschlagen")
+                    res["reason"] = f"Prüfung fehlgeschlagen ({type(exc).__name__})"
             out.append(res)
             continue
         try:

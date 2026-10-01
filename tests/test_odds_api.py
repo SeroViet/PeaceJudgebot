@@ -111,3 +111,15 @@ def test_no_ou_tip_without_own_reference():
                 elo_diff=0.0, odds={"best": {"U": 2.15}, "books": {"U": "COOL"}})
     assert tips_from_forecasts([MatchForecast(**base, ou_ok=False)]) == []
     assert len(tips_from_forecasts([MatchForecast(**base, ou_ok=True)])) == 1
+
+
+def test_month_reserve_keeps_credits_for_rest_of_month():
+    from datetime import date
+
+    from fussball.service import month_reserve_ok
+
+    # 1. Oktober: 30 Tage übrig × 8 Credits = 240 Reserve
+    assert month_reserve_ok(344, today=date(2026, 10, 1), per_day=8)
+    assert not month_reserve_ok(240, today=date(2026, 10, 1), per_day=8)  # zu viel verbraucht → sparen
+    assert month_reserve_ok(20, today=date(2026, 10, 31), per_day=8)  # letzter Tag: alles nutzbar
+    assert month_reserve_ok(None)

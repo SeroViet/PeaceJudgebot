@@ -248,7 +248,10 @@ def test_check_tips_reuses_research_cheaply(engine, fixture_bytes, bundesliga, m
     client = FakeClient({leg["match"]: "streichen"})
     first = runner.check_tips(engine, [item], client=client)
     assert first[0]["assessment"] == "streichen" and client.calls == 1  # volle Recherche (Websuche)
-    second = runner.check_tips(engine, [item, {**item, "match_id": None}], client=client)
+    second = runner.check_tips(engine, [item], client=client)
     assert client.calls == 1  # zweites Mal: keine neue Websuche, nur Bewertung der gespeicherten Fakten
-    assert second[0]["assessment"] == "streichen" and second[1]["assessment"] is None
+    assert second[0]["assessment"] == "streichen"
     assert runner.other_costs_today(engine)["n"] == 1
+    # Spiel nicht in unseren Daten: wird trotzdem über die Teamnamen recherchiert
+    unknown = runner.check_tips(engine, [{**item, "match_id": None, "match": "Deutschland – Serbien"}], client=client)
+    assert client.calls == 2 and unknown[0]["assessment"] == "bestätigt"

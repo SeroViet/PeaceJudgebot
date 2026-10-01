@@ -273,6 +273,20 @@ def _save_odds_state(engine: Engine, st: dict) -> None:
             s.add(AppSetting(key="odds_api_state", value=st))
 
 
+def month_reserve_ok(remaining: int | None, cost: int = 2, today=None, per_day: int | None = None) -> bool:
+    """Monats-Bremse für die Quoten-Credits: nur ausgeben, wenn danach für jeden restlichen Tag des Monats
+    noch mindestens ODDS_API_MIN_DAILY (8) Credits bleiben. Wirkt auch über Neustarts (der Zähler 'remaining'
+    kommt vom Anbieter): wird viel verbraucht, spart der Bot automatisch."""
+    import calendar
+
+    if remaining is None:
+        return True
+    per_day = per_day if per_day is not None else int(os.getenv("ODDS_API_MIN_DAILY", "8"))
+    today = today or utcnow().date()
+    days_left = calendar.monthrange(today.year, today.month)[1] - today.day
+    return remaining - cost >= days_left * per_day
+
+
 def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] | None = None) -> dict:
     """Alle Fussball-Wettbewerbe weltweit (inkl. Nations League, WM-Quali) nach Spielen in den
     nächsten `hours` Stunden durchsuchen (gratis) und für die Wettbewerbe mit den meisten
@@ -303,7 +317,7 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
         from fussball.data.odds_api import SPORT_KEYS
 
         for code in due:
-            if st["spent"] + 2 > budget:
+            if st["spent"] + 2 > budget or not month_reserve_ok(client.remaining):
                 break
             sport = SPORT_KEYS.get(code, code)
             with session_scope(engine) as s:
@@ -313,7 +327,7 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
             last = st["last"].get(sport)
             if last and utcnow() - datetime.fromisoformat(last) < timedelta(hours=interval):
                 continue
-            if st["spent"] + 2 > budget - reserve:
+            if st["spent"] + 2 > budget - reserve or not month_reserve_ok(client.remaining):
                 out.setdefault("skipped", []).append(f"{title} ({n})")
                 continue
             with session_scope(engine) as s:
@@ -325,7 +339,7 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
             last = st["last"].get(sport)
             if last and utcnow() - datetime.fromisoformat(last) < timedelta(hours=live_every):
                 continue
-            if st["spent"] + 2 > budget:
+            if st["spent"] + 2 > budget or not month_reserve_ok(client.remaining):
                 break
             with session_scope(engine) as s:
                 out.setdefault("live", {})[title] = import_generic(s, client, sport, title)

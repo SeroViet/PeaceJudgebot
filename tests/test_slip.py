@@ -100,3 +100,13 @@ def test_bookmakers_learned_separately(engine):
     assert slip.ratios(engine)["OU"]["ratio"] == pytest.approx(0.90, abs=0.01)
     assert slip.ratios(engine, "Bet365")["OU"]["ratio"] == pytest.approx(0.95, abs=0.01)
     assert "Bet365-Schein geprüft" in telegram_bot.format_slip(rows, [{}] * 3, "Bet365")
+
+
+def test_german_names_match_english_data():
+    fs = [forecast(1, "Germany", "Serbia"), forecast(2, "Republic of Ireland", "Austria"), forecast(3, "Wales", "Norway")]
+    data = slip.Slip(is_betting_slip=True, bookmaker="Bet365", total_odds=None, legs=[
+        leg("Deutschland – Endergebnis", [part("1X2", "H")], 1.25, None),
+        leg("Österreich – Endergebnis", [part("1X2", "A")], 2.0, None, home="Irland", away="Österreich"),
+        leg("Norwegen – Endergebnis", [part("1X2", "A")], 1.5, None, home="Wales", away="Norwegen")])
+    rows = slip.evaluate(data, fs)
+    assert [r.get("match_id") for r in rows] == [1, 2, 3] and all(r["prob"] for r in rows)

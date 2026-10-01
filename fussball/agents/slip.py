@@ -64,6 +64,8 @@ line -1; "Resultat 2:1" = CS; "1. Halbzeit - …" = gleicher Markt mit half 1h.
 Ein BetBuilder (mehrere Tipps im selben Spiel mit EINER Quote) ist EINE Wette mit mehreren parts.
 Zeigt eine Spielseite viele Quoten, nimm jede sichtbare Quote als eigene Wette (ein part). Markiere
 erhöhte Quoten (Boost, Prämie, durchgestrichene alte Quote) mit boosted. Dezimalquoten mit Punkt.
+Ordne jede Wette über match_id dem passenden Spiel aus der Liste zu – die Liste ist auf Englisch
+(Deutschland = Germany, Dänemark = Denmark, Niederlande = Netherlands, Irland = Republic of Ireland …).
 Erfinde nichts: was nicht lesbar ist, lässt du weg."""
 
 
@@ -118,15 +120,55 @@ def family(key: str) -> str:
     return half + base
 
 
-def _find_forecast(forecasts, home: str, away: str):
-    from fussball.data.odds_api import similarity
+# Deutsche Namen (Sporttip/Bet365 auf Deutsch) → englische Namen der Quoten-Quelle
+GERMAN_NAMES = {
+    "deutschland": "germany", "dänemark": "denmark", "griechenland": "greece", "niederlande": "netherlands",
+    "holland": "netherlands", "norwegen": "norway", "irland": "republic of ireland", "österreich": "austria",
+    "serbien": "serbia", "schweiz": "switzerland", "frankreich": "france", "spanien": "spain", "italien": "italy",
+    "england": "england", "schottland": "scotland", "nordirland": "northern ireland", "belgien": "belgium",
+    "kroatien": "croatia", "polen": "poland", "tschechien": "czech republic", "slowakei": "slovakia",
+    "slowenien": "slovenia", "ungarn": "hungary", "rumänien": "romania", "bulgarien": "bulgaria",
+    "türkei": "turkey", "schweden": "sweden", "finnland": "finland", "island": "iceland", "färöer": "faroe islands",
+    "russland": "russia", "ukraine": "ukraine", "weissrussland": "belarus", "belarus": "belarus",
+    "litauen": "lithuania", "lettland": "latvia", "estland": "estonia", "georgien": "georgia",
+    "armenien": "armenia", "aserbaidschan": "azerbaijan", "kasachstan": "kazakhstan", "moldawien": "moldova",
+    "nordmazedonien": "north macedonia", "albanien": "albania", "montenegro": "montenegro",
+    "bosnien-herzegowina": "bosnia and herzegovina", "bosnien und herzegowina": "bosnia and herzegovina",
+    "luxemburg": "luxembourg", "liechtenstein": "liechtenstein", "andorra": "andorra", "zypern": "cyprus",
+    "malta": "malta", "gibraltar": "gibraltar", "san marino": "san marino", "israel": "israel", "kosovo": "kosovo",
+    "brasilien": "brazil", "argentinien": "argentina", "mexiko": "mexico", "vereinigte staaten": "usa",
+    "usa": "usa", "kolumbien": "colombia", "marokko": "morocco", "ägypten": "egypt", "japan": "japan",
+    "südkorea": "south korea", "australien": "australia", "kanada": "canada", "wales": "wales", "portugal": "portugal",
+    "bayern münchen": "bayern munich", "inter mailand": "inter milan", "ac mailand": "ac milan",
+    "juventus turin": "juventus", "ssc neapel": "napoli", "as rom": "as roma", "lazio rom": "lazio",
+}
 
+
+def _norm(name: str) -> str:
+    n = name.lower().strip()
+    n = GERMAN_NAMES.get(n, n)
+    for a, b in (("ä", "a"), ("ö", "o"), ("ü", "u"), ("é", "e"), ("ø", "o"), ("å", "a"), ("æ", "ae")):
+        n = n.replace(a, b)
+    return " ".join(w for w in n.replace("-", " ").split() if w not in ("fc", "cf", "sc", "ac", "the", "of"))
+
+
+def _name_score(a: str, b: str) -> float:
+    from difflib import SequenceMatcher
+
+    na, nb = _norm(a), _norm(b)
+    if na == nb or (na and nb and (set(na.split()) <= set(nb.split()) or set(nb.split()) <= set(na.split()))):
+        return 1.0
+    return SequenceMatcher(None, na, nb).ratio()
+
+
+def _find_forecast(forecasts, home: str, away: str):
+    """Spiel zu deutschen/englischen Teamnamen finden (übersetzt, tolerant bei Schreibweisen)."""
     best, score = None, 0.0
     for f in forecasts:
-        s = min(similarity(home, f.home), similarity(away, f.away))
+        s = min(_name_score(home, f.home), _name_score(away, f.away))
         if s > score:
             best, score = f, s
-    return best if score >= 0.75 else None
+    return best if score >= 0.8 else None
 
 
 def evaluate(slip: Slip, forecasts) -> list[dict]:

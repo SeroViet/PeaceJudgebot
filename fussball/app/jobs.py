@@ -42,10 +42,12 @@ async def start(engine) -> list:
         log.info("Telegram-Bot gestartet")
         await telegram_bot.notify(_bot, "✅ <b>PeaceJudge gestartet</b>\nIch melde mich mit Tipps, Erinnerungen und "
                                         "Ergebnissen. /start zeigt alle Befehle.")
+    if _bot is not None:
+        await _restore_costs(engine)
     if os.getenv("DISABLE_SCHEDULER") == "1":
         return []
     tasks = [asyncio.create_task(_refresh_loop(engine)), asyncio.create_task(_daily_loop(engine)),
-             asyncio.create_task(_reminder_loop(engine))]
+             asyncio.create_task(_reminder_loop(engine)), asyncio.create_task(_cost_pin_loop(engine))]
     url = os.getenv("RENDER_EXTERNAL_URL")
     if url and os.getenv("KEEP_AWAKE", "1") == "1":
         tasks.append(asyncio.create_task(_keep_awake(url)))
@@ -62,6 +64,45 @@ async def _keep_awake(base_url: str, every_s: int = 600):
             await loop.run_in_executor(None, lambda: requests.get(base_url.rstrip("/") + "/healthz", timeout=20))
         except Exception as exc:  # noqa: BLE001
             log.warning("Keep-awake fehlgeschlagen: %s", exc)
+
+
+async def _restore_costs(engine) -> None:
+    """Tageskosten aus der angehefteten Nachricht übernehmen (überlebt Neustarts auf dem Gratisplan)."""
+    from fussball.agents import runner
+
+    owner = telegram_bot.owner_id()
+    try:
+        chat = await _bot.bot.get_chat(owner)
+        pinned = chat.pinned_message
+        usd = runner.parse_pin(pinned.text if pinned else None)
+        if usd:
+            runner.restore_carryover(engine, usd)
+            log.info("Tageskosten nach Neustart übernommen: %.2f $", usd)
+    except Exception:  # noqa: BLE001
+        log.exception("Angeheftete Kosten-Nachricht nicht lesbar")
+
+
+async def _cost_pin_loop(engine, every_s: int = 300):
+    """Alle 5 Minuten: angeheftete Nachricht mit den heutigen Claude-Kosten aktualisieren."""
+    from fussball.agents import runner
+
+    owner, last = telegram_bot.owner_id(), None
+    while True:
+        try:
+            text = runner.pin_text(engine)
+            if _bot is not None and owner and text != last:
+                chat = await _bot.bot.get_chat(owner)
+                pinned = chat.pinned_message
+                if pinned and (pinned.text or "").startswith(runner.PIN_PREFIX):
+                    if pinned.text != text:
+                        await _bot.bot.edit_message_text(text, chat_id=owner, message_id=pinned.message_id)
+                else:
+                    msg = await _bot.bot.send_message(owner, text, disable_notification=True)
+                    await _bot.bot.pin_chat_message(owner, msg.message_id, disable_notification=True)
+                last = text
+        except Exception:  # noqa: BLE001
+            log.exception("Kosten-Nachricht konnte nicht aktualisiert werden")
+        await asyncio.sleep(every_s)
 
 
 async def stop() -> None:

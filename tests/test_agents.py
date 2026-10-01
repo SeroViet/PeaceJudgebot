@@ -221,3 +221,20 @@ def test_value_only_drops_combos_paying_below_fair(monkeypatch):
     monkeypatch.setenv("VALUE_ONLY", "1")
     text = telegram_bot.format_today(plan)
     assert "T1" in text and "T2 ·" not in text and "1 Kombi(s) weggelassen" in text
+
+
+def test_daily_cost_survives_restart_via_pin(engine, tmp_path, monkeypatch):
+    from fussball.data.db import init_db, make_engine
+
+    monkeypatch.setenv("AGENT_DAILY_BUDGET_USD", "1.5")
+    runner.add_other_cost(engine, 0.9)
+    text = runner.pin_text(engine)
+    assert text.startswith(runner.PIN_PREFIX) and "0.90 $ von 1.50 $" in text
+    # Neustart = leere Datenbank; Kosten kommen aus der angehefteten Nachricht zurück
+    fresh = make_engine(f"sqlite:///{tmp_path / 'fresh.db'}")
+    init_db(fresh)
+    assert runner.spent_today(fresh) == 0
+    runner.restore_carryover(fresh, runner.parse_pin(text))
+    runner.restore_carryover(fresh, runner.parse_pin(text))  # doppelt einlesen zählt nicht doppelt
+    assert runner.spent_today(fresh) == pytest.approx(0.9)
+    assert runner.parse_pin("📌 Claude-Kosten (UTC 2020-01-01): 1.20 $ von 1.50 $ Tageslimit") is None

@@ -33,7 +33,21 @@ def other_costs_today(engine: Engine) -> dict:
     with session_scope(engine) as s:
         row = s.get(AppSetting, "claude_other_costs")
         v = dict(row.value) if row and isinstance(row.value, dict) else {}
-    return v if v.get("day") == utcnow().date().isoformat() else {"day": utcnow().date().isoformat(), "usd": 0.0, "n": 0}
+    return v if v.get("day") == utcnow().date().isoformat() else {"day": utcnow().date().isoformat(), "usd": 0.0, "n": 0,
+                                                                  "carry": 0.0}
+
+
+def restore_carryover(engine: Engine, usd: float) -> None:
+    """Nach einem Neustart: heute bereits ausgegebene Kosten (aus der angehefteten Telegram-Nachricht)
+    wieder einrechnen, damit das Tageslimit über Neustarts hinweg gilt."""
+    v = other_costs_today(engine)
+    v.update(usd=v["usd"] - v.get("carry", 0.0) + usd, carry=usd)
+    with session_scope(engine) as s:
+        row = s.get(AppSetting, "claude_other_costs")
+        if row:
+            row.value = v
+        else:
+            s.add(AppSetting(key="claude_other_costs", value=v))
 
 
 def add_other_cost(engine: Engine, usd: float) -> None:
@@ -48,6 +62,24 @@ def add_other_cost(engine: Engine, usd: float) -> None:
             s.add(AppSetting(key="claude_other_costs", value=v))
 
 
+PIN_PREFIX = "📌 Claude-Kosten"
+
+
+def pin_text(engine: Engine) -> str:
+    return (f"{PIN_PREFIX} (UTC {utcnow().date().isoformat()}): {spent_today(engine):.2f} $ "
+            f"von {daily_budget():.2f} $ Tageslimit")
+
+
+def parse_pin(text: str | None) -> float | None:
+    """Heute bereits ausgegebene Kosten aus der angehefteten Nachricht (None, wenn von einem anderen Tag)."""
+    import re
+
+    m = re.search(r"\(UTC (\d{4}-\d{2}-\d{2})\): ([\d.]+) \$", text or "")
+    if not m or m.group(1) != utcnow().date().isoformat():
+        return None
+    return float(m.group(2))
+
+
 def cost_summary(engine: Engine) -> str:
     today = utcnow().date()
     with session_scope(engine) as s:
@@ -55,12 +87,14 @@ def cost_summary(engine: Engine) -> str:
             AgentReport.created_at >= datetime.combine(today, datetime.min.time()))).all()
     other = other_costs_today(engine)
     total = float(sum(scout)) + other["usd"]
+    carry = other.get("carry", 0.0)
     return (f"🤖 <b>Claude-Kosten heute</b>\n"
             f"Scout: {len(scout)} Spiele · {sum(scout):.2f} $\n"
-            f"Screenshots: {other['n']} · {other['usd']:.2f} $\n"
-            f"<b>Total {total:.2f} $ von {daily_budget():.2f} $ Tageslimit</b>\n"
-            f"<i>Zähler startet nach einem Neustart des Servers neu – das Monatslimit bei Anthropic ist die "
-            f"sichere Grenze.</i>")
+            f"Screenshots: {other['n']} · {other['usd'] - carry:.2f} $\n"
+            + (f"Vor dem letzten Neustart: {carry:.2f} $\n" if carry else "")
+            + f"<b>Total {total:.2f} $ von {daily_budget():.2f} $ Tageslimit</b>\n"
+            f"<i>Das Tageslimit gilt auch über Neustarts (📌 angeheftete Nachricht). Zusätzliche Sicherung: "
+            f"Monatslimit bei Anthropic.</i>")
 
 
 def fatigue_context(engine: Engine, match_id: int) -> str:

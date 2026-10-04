@@ -640,7 +640,7 @@ KRASS_MARKETS = ("1X2", "OU2.5", "BTTS", "HOME1.5", "AWAY1.5")
 
 def risky_combos(forecasts: list[MatchForecast], safe_combos: list[dict], size: int = 3, min_prob: float = 0.60,
                  max_prob: float = 0.72, tz: str = "Europe/Zurich", skip: set[int] | None = None,
-                 markets: tuple[str, ...] = RISKY_MARKETS) -> list[dict]:
+                 markets: tuple[str, ...] = RISKY_MARKETS, exclude: set | None = None) -> list[dict]:
     """Pro Tag eine Risiko-Kombi aus `size` Spielen, möglichst andere als in der sicheren Tageskombi."""
     from zoneinfo import ZoneInfo
 
@@ -650,7 +650,7 @@ def risky_combos(forecasts: list[MatchForecast], safe_combos: list[dict], size: 
         used.setdefault(c["day"], set()).update(l["match_id"] for l in c["legs"])
     by_day: dict[str, list[dict]] = {}
     for t in best_tip_per_match([f for f in forecasts if f.match_id not in (skip or set())], min_prob, max_prob,
-                                markets, exclude=RISKY_EXCLUDED):
+                                markets, exclude=RISKY_EXCLUDED if exclude is None else exclude):
         day = datetime.fromisoformat(t["kickoff"]).replace(tzinfo=ZoneInfo("UTC")).astimezone(zone).date().isoformat()
         by_day.setdefault((day, category(t["comp"], t.get("comp_name"))), []).append(t)
     out = []
@@ -764,6 +764,14 @@ def build_extra_combos(plan: "DailyPlan", kind: str, skip: set[int] | None = Non
     """Risiko- (kind='risky', 2 BetBuilder), Krass- (kind='krass', 3 BetBuilder) oder Boost-Kombi
     (kind='boost', Tipps ab Sporttip-Quote 1.50 für den KombiBoost)."""
     pool = plan.all_forecasts or plan.forecasts
+    if kind == "torfest":
+        # 2 Tore vor der Pause, nur in den torreichsten Spielen (im Backtest mit 2003 torreichen Spielen
+        # kalibriert: 51 % erwartet → 52 % getroffen)
+        tc = plan.config.get("torfest_combo", {})
+        rich = [f for f in pool if f.implied_rates and sum(f.implied_rates) >= tc.get("min_goals", 2.9)]
+        return [{**c, "torfest": True, "risky": False} for c in risky_combos(
+            rich, plan.day_combos, tc.get("size", 3), tc.get("min_prob", 0.45), tc.get("max_prob", 0.70),
+            skip=skip, markets=("H1_OU1.5",), exclude={("H1_OU1.5", "U")})]
     if kind == "boost":
         bc = plan.config.get("boost_combo", {})
         return [{**c, "boost": True, "risky": False} for c in risky_combos(
@@ -969,6 +977,7 @@ class DailyPlan:
     risky_combos: list[dict] = field(default_factory=list)
     krass_combos: list[dict] = field(default_factory=list)
     boost_combos: list[dict] = field(default_factory=list)
+    torfest_combos: list[dict] = field(default_factory=list)
     top: list[dict] = field(default_factory=list)  # bester Tipp pro Spiel (für /top5)
 
 

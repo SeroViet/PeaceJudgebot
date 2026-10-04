@@ -206,6 +206,8 @@ async def _daily_loop(engine=None):
         plan = state.load_plan()
         await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
         await telegram_bot.notify(_bot, telegram_bot.format_boost(plan))
+        await telegram_bot.notify(_bot, telegram_bot.format_boost(
+            plan, "torfest_combos", "⚡ <b>Torfest-Kombi heute</b> (2 Tore vor der Pause, torreichste Spiele)"))
         _track_top(engine, plan)
         if os.getenv("DAILY_FULL", "0") == "1":  # ausführliche Kombis nur auf Wunsch, sonst /tageskombi
             await telegram_bot.notify(_bot, "☀️ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))

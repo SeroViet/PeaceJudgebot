@@ -130,3 +130,30 @@ def test_boost_combo_tips_from_150(engine, monkeypatch):
     assert all(telegram_bot.leg_sporttip(l) >= 1.5 for l in legs)  # jeder Tipp ab 1.50 → KombiBoost
     text = telegram_bot.format_boost({"boost_combos": [{**boost[0], "id": "B1"}]})
     assert "Boost-Kombi heute" in text and "Quote ca." in text and "Gesamtquote ca." in text
+
+
+def test_torfest_only_high_scoring_matches(engine, monkeypatch):
+    from datetime import datetime, timedelta
+
+    from fussball import service
+    from fussball.app import state
+    from fussball.models.builder import halftime_markets
+    from fussball.models.implied import implied_markets
+    from fussball.service import MatchForecast
+
+    start = datetime.now(state.TZ) + timedelta(minutes=20)
+    if (start + timedelta(hours=4)).date() != start.date():
+        return
+    kick = start.astimezone(__import__("zoneinfo").ZoneInfo("UTC")).replace(tzinfo=None)
+    rates = [(2.4, 1.5), (2.6, 1.2), (2.0, 1.4), (1.2, 0.9), (2.2, 1.3)]  # Nr. 3 = 2.4 Tore erwartet → zu wenig
+    fs = [MatchForecast(i, "soccer_epl", "EPL", kick + timedelta(minutes=10 * i), f"H{i}", f"A{i}", l, m, {}, {}, {},
+                        None, None, 0.0, {}, implied={**implied_markets(l, m), **halftime_markets(l, m)},
+                        implied_rates=(l, m)) for i, (l, m) in enumerate(rates)]
+    monkeypatch.setattr(service, "market_forecasts", lambda engine, hours: fs)
+    plan = service.daily_plan(engine, days=3, forecasts=[])
+    tf = service.build_extra_combos(plan, "torfest")
+    assert tf and tf[0]["size"] == 3
+    assert {l["match_id"] for l in tf[0]["legs"]} == {0, 1, 4}  # nur die torreichsten Spiele
+    assert all(l["market"] == "H1_OU1.5" and l["selection"] == "O" for l in tf[0]["legs"])
+    text = telegram_bot.format_day_combos({"day_combos": [{**tf[0], "id": "F1"}]})
+    assert "Torfest-Kombi" in text and "1. Halbzeit: Über 1.5 Tore" in text

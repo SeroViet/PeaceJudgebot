@@ -46,6 +46,13 @@ boost_combo:
   min_prob: 0.55
   max_prob: 0.62
 
+# Torfest-Kombi: "1. Halbzeit Über 1.5" in den torreichsten Spielen (ab 2.9 erwarteten Toren)
+torfest_combo:
+  size: 3
+  min_prob: 0.45
+  max_prob: 0.70
+  min_goals: 2.9
+
 # Krass-Kombi: 3 BetBuilder mit je Quote ca. 2–3 → Gesamtquote ca. 8–25
 krass_combo:
   builders: 3

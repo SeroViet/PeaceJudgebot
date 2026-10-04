@@ -63,9 +63,13 @@ SHORT_CAT = {"national": "🌍 Länderspiele", "europa": "🏆 Europapokal", "li
              "andere": "⚽ Andere Ligen"}
 
 
-def top_tips(plan: dict, n: int = 5, day: str | None = None) -> dict[str, list[dict]]:
-    """Pro Wettbewerbs-Art die n besten Tipps von heute (ein Tipp pro Spiel, nur Spiele, die noch kommen).
-    Vom Scout gestrichene Spiele fallen weg."""
+def top_n() -> int:
+    return int(os.getenv("TOP_TIPS", "6"))
+
+
+def top_tips(plan: dict, n: int | None = None, day: str | None = None) -> dict[str, list[dict]]:
+    """Die n sichersten Tipps von heute (ein Tipp pro Spiel, nur Spiele, die noch kommen), nach
+    Wettbewerbs-Art getrennt. Spiele, bei denen der Scout warnt oder streicht, fallen weg."""
     from datetime import datetime
 
     from fussball.service import COMBO_MARKETS, EXCLUDED_TIPS, category
@@ -82,7 +86,7 @@ def top_tips(plan: dict, n: int = 5, day: str | None = None) -> dict[str, list[d
     for t in plan.get("top") or plan.get("safe", []):
         k = state.local(t["kickoff"])
         if (k.date().isoformat() != day or k <= now or t["market"] not in COMBO_MARKETS
-                or (t["market"], t["selection"]) in EXCLUDED_TIPS or agent.get(t["match_id"]) == "streichen"
+                or (t["market"], t["selection"]) in EXCLUDED_TIPS or agent.get(t["match_id"]) in ("streichen", "vorsicht")
                 or ((t["market"], t["selection"]) == ("OU4.5", "U") and t.get("profile") != "zaeh")):
             continue
         if t["prob"] > best.get(t["match_id"], {}).get("prob", 0):
@@ -90,20 +94,21 @@ def top_tips(plan: dict, n: int = 5, day: str | None = None) -> dict[str, list[d
                                    "reason": reports.get(t["match_id"], {}).get("reason", "")}
     from fussball.service import _varied
 
+    # die sichersten zuerst; höchstens 2× derselbe Tipp – sonst nächstbester Tipp desselben Spiels
+    chosen = _varied(sorted(best.values(), key=lambda t: -t["prob"]), n or top_n())
     by_cat: dict[str, list[dict]] = {}
-    for t in sorted(best.values(), key=lambda t: -t["prob"]):
+    for t in sorted(chosen, key=lambda t: t["kickoff"]):
         by_cat.setdefault(category(t["comp"], t.get("comp_name")), []).append(t)
-    # höchstens 2× derselbe Tipp – sonst nächstbester Tipp desselben Spiels
-    return {c: sorted(_varied(ts, n), key=lambda t: t["kickoff"]) for c, ts in by_cat.items()}
+    return by_cat
 
 
-def format_top5(plan: dict, n: int = 5) -> str:
-    """Kurz und klar: die besten Tipps von heute, je Wettbewerbs-Art, eine Zeile pro Spiel."""
+def format_top5(plan: dict, n: int | None = None) -> str:
+    """Kurz und klar: die sichersten Tipps von heute, je Wettbewerbs-Art, eine Zeile pro Spiel."""
     groups = top_tips(plan, n)
     if not groups:
         return "📭 Heute keine sicheren Tipps mehr. Morgen früh kommen neue."
     icon = {"bestätigt": " 🟢", "vorsicht": " 🔴"}
-    out = ["🔥 <b>Top-Tipps heute</b>"]
+    out = ["🛡️ <b>Sichere Tipps heute</b>"]
     for cat in SHORT_CAT:
         ts = groups.get(cat)
         if not ts:
@@ -121,7 +126,7 @@ def format_top5(plan: dict, n: int = 5) -> str:
                           else ""))
         if len(ts) > 1:
             out.append(f"<i>Alle {len(ts)} als Kombi: Chance {prob:.0%}</i>")
-    out.append("\n<i>🟢 = Scout bestätigt · 🔴 = Scout warnt. Mehr: /tageskombi · /risiko · /krass</i>")
+    out.append("\n<i>🟢 = Scout hat Aufstellung, Ausfälle &amp; Torwart geprüft. Gewarnte Spiele sind schon raus.</i>")
     return "\n".join(out)
 
 
@@ -509,7 +514,7 @@ def format_stats(engine) -> str:
 
 
 COMMANDS = [
-    ("top5", "Die 5 besten Tipps von heute – kurz"),
+    ("top5", "Die 5–6 sichersten Tipps von heute, vom Scout geprüft"),
     ("tageskombi", "3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("boost", "Boost-Kombi: Tipps ab Quote 1.50 + Sporttip-KombiBoost"),
     ("torfest", "Torfest: 1. Halbzeit Über 1.5 in den torreichsten Spielen"),

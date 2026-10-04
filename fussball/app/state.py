@@ -105,7 +105,7 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
             setattr(plan, attr, service.build_extra_combos(plan, kind))
             service.annotate_value(engine, getattr(plan, attr))
             # AGENT_COMBOS: was der Scout prüft (B = Boost, F = Torfest, R = Risiko, X = Krass, T = Top-Tipps); Tageskombi immer
-            scope = os.getenv("AGENT_COMBOS", "B,F,R,X,T").upper()
+            scope = os.getenv("AGENT_COMBOS", "T").upper()
             checked = agents and letter in scope
             try:
                 info["agent"] += service.apply_agents_risky(engine, plan, cached_only=not checked, kind=kind)
@@ -113,7 +113,7 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
                 log.exception("Agenten (%s) fehlgeschlagen", kind)
         # Top-Tipps (/top5): beim täglichen Agentenlauf mitprüfen, sonst letzte Urteile übernehmen
         try:
-            if agents and "T" in os.getenv("AGENT_COMBOS", "B,F,R,X,T").upper():
+            if agents and "T" in os.getenv("AGENT_COMBOS", "T").upper():
                 info["agent"] += service.apply_agents_top(engine, plan)
             else:
                 service.carry_top_agents(plan, old.get("top", []))

@@ -102,8 +102,12 @@ def test_top5_short_and_by_category():
     safe.append({**safe[0], "market": "OU4.5", "selection": "U", "label": "Unter 4.5 Tore", "prob": 0.89})
     text = telegram_bot.format_top5({"safe": safe, "day_combos": [], "risky_combos": [], "krass_combos": []})
     assert "🌍 Länderspiele" in text and "🌎 Südamerika" in text
-    assert text.count("➡️") == 7  # 5 Länderspiele + 2 Frauen, ein Tipp pro Spiel
+    assert text.count("➡️") == 6  # die 6 sichersten Tipps insgesamt, ein Tipp pro Spiel
     assert "Unter 4.5" not in text and len(text) < 1500
+    # Spiele, bei denen der Scout warnt, fallen ganz weg
+    warned = [{**t, "agent": "vorsicht", "reason": "Torwart fehlt"} if t["match_id"] == 7 else t for t in safe]
+    text = telegram_bot.format_top5({"top": warned})
+    assert "H7 – A7" not in text and "Torwart fehlt" not in text
 
 
 def test_boost_combo_tips_from_150(engine, monkeypatch):

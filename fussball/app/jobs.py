@@ -206,9 +206,10 @@ async def _daily_loop(engine=None):
             await asyncio.sleep(30)
         plan = state.load_plan()
         await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
-        await telegram_bot.notify(_bot, telegram_bot.format_boost(plan))
-        await telegram_bot.notify(_bot, telegram_bot.format_boost(
-            plan, "torfest_combos", "⚡ <b>Torfest-Kombi heute</b> (2 Tore vor der Pause, torreichste Spiele)"))
+        if os.getenv("DAILY_EXTRA", "0") == "1":  # riskantere Kombis nur auf Wunsch (sonst /boost, /torfest)
+            await telegram_bot.notify(_bot, telegram_bot.format_boost(plan))
+            await telegram_bot.notify(_bot, telegram_bot.format_boost(
+                plan, "torfest_combos", "⚡ <b>Torfest-Kombi heute</b> (2 Tore vor der Pause, torreichste Spiele)"))
         _track_top(engine, plan)
         if os.getenv("DAILY_FULL", "0") == "1":  # ausführliche Kombis nur auf Wunsch, sonst /tageskombi
             await telegram_bot.notify(_bot, "☀️ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))
@@ -232,7 +233,7 @@ def due_reminders(plan: dict, now: datetime, minutes: int, already: set[str]) ->
     return out
 
 
-LINEUP_SOURCES = ("day_combos", "boost_combos", "torfest_combos", "risky_combos", "krass_combos")
+LINEUP_SOURCES = ("day_combos",)  # + Top-Tipps; riskante Kombis nicht (Budget für die sicheren Tipps)
 
 
 def due_lineup_checks(plan: dict, now: datetime, minutes: int, already: set[str]) -> list[dict]:

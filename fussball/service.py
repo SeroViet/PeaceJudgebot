@@ -882,7 +882,7 @@ def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: 
     from fussball.agents import runner
     from fussball.app.state import local
 
-    limit = limit or int(os.getenv("AGENT_TOP_MAX", "15"))
+    limit = limit or int(os.getenv("AGENT_TOP_MAX", "10"))
     now = utcnow()
     todo = sorted((t for t in plan.top
                    if now < datetime.fromisoformat(t["kickoff"]) <= now + timedelta(hours=horizon_h)),

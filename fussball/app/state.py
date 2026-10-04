@@ -122,6 +122,10 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
         info["combo_results"] = service.evaluate_served(engine)
         from fussball import tracking
 
+        try:
+            tracking.fill_halftime(engine)  # Halbzeitstände für Halbzeit-Tipps per Agent nachschlagen
+        except Exception:  # noqa: BLE001
+            log.exception("Halbzeitstände nicht ermittelt")
         tracking.settle(engine)
         info["tracked_results"] = tracking.finished_batches(engine)
         path = plan_path()

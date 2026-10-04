@@ -219,6 +219,38 @@ def judge_tip(client, intel: MatchIntel, match: str, tip: str, model: str = MODE
     return resp.parsed_output, _cost(model, resp.usage, 0)
 
 
+class HalfTime(BaseModel):
+    found: bool = Field(description="True nur, wenn der Halbzeitstand in einer Quelle eindeutig steht")
+    ht_home: int | None = Field(description="Tore Heimteam zur Halbzeit")
+    ht_away: int | None = Field(description="Tore Gastteam zur Halbzeit")
+
+
+def halftime_score(client, match: str, date: str, final: str, model: str = MODEL) -> tuple[HalfTime, float]:
+    """Halbzeitstand eines beendeten Spiels per Websuche nachschlagen (die Ergebnis-Quelle liefert nur den Endstand)."""
+    tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 2}]
+    messages = [{"role": "user", "content": f"Wie stand es zur Halbzeit im Fussballspiel {match} am {date}? "
+                                            f"Endstand war {final}. Antworte kurz mit dem Halbzeitstand und der Quelle."}]
+    cost, text = 0.0, ""
+    for _ in range(3):
+        resp = client.beta.messages.create(model=model, max_tokens=2000, tools=tools, messages=messages,
+                                           output_config={"effort": "low"}, betas=[FALLBACK_BETA], fallbacks="default")
+        n = _count_searches(resp.content)
+        cost += _cost(model, resp.usage, n)
+        if resp.stop_reason == "pause_turn":
+            messages = [messages[0], {"role": "assistant", "content": resp.content}]
+            continue
+        text = "\n".join(b.text for b in resp.content if b.type == "text")
+        break
+    parsed = client.beta.messages.parse(
+        model=model, max_tokens=1000, output_format=HalfTime, output_config={"effort": "low"},
+        betas=[FALLBACK_BETA], fallbacks="default",
+        messages=[{"role": "user", "content": f"Spiel: {match} (Endstand {final})\nRecherche:\n{text}\n\n"
+                                              "Halbzeitstand (Heim:Gast) eintragen; found=false, wenn unklar."}])
+    cost += _cost(model, parsed.usage, 0)
+    ht = parsed.parsed_output or HalfTime(found=False, ht_home=None, ht_away=None)
+    return ht, cost
+
+
 def make_client():
     """Anthropic-Client oder None, wenn keine Zugangsdaten konfiguriert sind."""
     if not (os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")):

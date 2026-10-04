@@ -174,3 +174,34 @@ def test_bot_top_tips_tracked_per_day(engine, fixture_bytes, bundesliga):
     tracking.settle(engine)
     (title, items), = tracking.finished_batches(engine)
     assert "Top-Tipps 04.10." in title and [i["won"] for i in items] == [True, False]
+
+
+def test_agent_fills_halftime_for_halftime_tips(engine, fixture_bytes, bundesliga):
+    from sqlalchemy import select
+
+    from fussball import tracking
+    from fussball.agents import scout
+    from fussball.data import football_data as fd
+    from fussball.data.db import session_scope
+    from fussball.data.schema import Match, utcnow
+
+    with session_scope(engine) as s:
+        fd.import_season(s, bundesliga, "2627", fixture_bytes("D1_2627_sample.csv"))
+        m = s.scalars(select(Match)).first()
+        m.status, m.ft_home, m.ft_away, m.ht_home, m.ht_away = "finished", 2, 1, None, None
+        m.kickoff_utc = utcnow()
+        mid = m.id
+    tips = [{"match_id": mid, "match": "A – B", "kickoff": utcnow().isoformat(), "label": "1. Halbzeit: Über 0.5",
+             "market": "H1_OU0.5", "selection": "O"}]
+    tracking.track_tips(engine, tips, "2026-10-04")
+    assert tracking.settle(engine) == []  # Halbzeitstand fehlt → wartet
+    usage = SimpleNamespace(input_tokens=1000, output_tokens=100, cache_creation_input_tokens=0,
+                            cache_read_input_tokens=0)
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(
+        create=lambda **kw: SimpleNamespace(stop_reason="end_turn", usage=usage,
+                                            content=[SimpleNamespace(type="text", text="Halbzeit 1:0")]),
+        parse=lambda **kw: SimpleNamespace(stop_reason="end_turn", usage=usage,
+                                           parsed_output=scout.HalfTime(found=True, ht_home=1, ht_away=0)))))
+    assert tracking.fill_halftime(engine, client) == 1
+    done = tracking.settle(engine)
+    assert done[0]["won"] is True

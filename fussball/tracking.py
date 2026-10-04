@@ -3,6 +3,8 @@ mit 🟢 gewonnen / 🔴 verloren gemeldet (nur Spiele, keine Quoten)."""
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import numpy as np
 from sqlalchemy import Engine
 
@@ -92,6 +94,43 @@ def part_won(p: Part, fh: int, fa: int, hh: int | None, ha: int | None) -> bool 
     return bool(_mask(p, np.array(fh), np.array(fa)))
 
 
+def fill_halftime(engine: Engine, client=None, limit: int = 6) -> int:
+    """Für beendete Spiele mit Halbzeit-Tipp, aber ohne Halbzeitstand: den Agenten nachschlagen lassen
+    (ca. 2–5 Rappen pro Spiel, zählt zum Tageslimit). Ergebnis wird beim Spiel gespeichert."""
+    from fussball.agents import runner, scout
+
+    with session_scope(engine) as s:
+        need = []
+        for it in _load(s):
+            if it["done"] or not any(p[3] == "1h" for p in it["parts"]):
+                continue
+            m = s.get(Match, it["match_id"])
+            if m is not None and m.status == "finished" and m.ft_home is not None and m.ht_home is None:
+                need.append((m.id, it["match"], m.kickoff_utc.strftime("%d.%m.%Y"), f"{m.ft_home}:{m.ft_away}"))
+    need = list({n[0]: n for n in need}.values())[:limit]
+    if not need:
+        return 0
+    client = client or scout.make_client()
+    if client is None:
+        return 0
+    filled = 0
+    for mid, match, date, final in need:
+        if runner.spent_today(engine) + 0.1 > runner.daily_budget():
+            break
+        try:
+            ht, cost = scout.halftime_score(client, match, date, final)
+        except Exception:  # noqa: BLE001
+            continue
+        runner.add_other_cost(engine, cost)
+        fh, fa = (int(x) for x in final.split(":"))
+        if ht.found and ht.ht_home is not None and ht.ht_away is not None and ht.ht_home <= fh and ht.ht_away <= fa:
+            with session_scope(engine) as s:
+                m = s.get(Match, mid)
+                m.ht_home, m.ht_away = ht.ht_home, ht.ht_away
+            filled += 1
+    return filled
+
+
 def settle(engine: Engine) -> list[dict]:
     """Beendete Spiele abrechnen; gibt die neu entschiedenen Tipps zurück (won True/False/None)."""
     out = []
@@ -103,6 +142,9 @@ def settle(engine: Engine) -> list[dict]:
             m = s.get(Match, it["match_id"])
             if m is None or m.status != "finished" or m.ft_home is None:
                 continue
+            if m.ht_home is None and any(p[3] == "1h" for p in it["parts"]) and \
+                    m.kickoff_utc > utcnow() - timedelta(days=2):
+                continue  # Halbzeitstand fehlt noch – der Agent schlägt ihn nach
             results = [part_won(Part(mk, sel, float(line), half), m.ft_home, m.ft_away, m.ht_home, m.ht_away)
                        for mk, sel, line, half in it["parts"]]
             it["won"] = None if None in results else all(results)

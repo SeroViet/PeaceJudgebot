@@ -242,6 +242,22 @@ def verdict(row: dict, check: dict) -> tuple[bool | None, str]:
     return None, reason or "nicht geprüft"
 
 
+def format_results(items: list[dict], title: str = "📋 <b>Ergebnisse</b>") -> str:
+    """Nur die Spiele: 🟢 gewonnen, 🔴 verloren, ⚪ nicht auswertbar, ⏳ läuft noch."""
+    if not items:
+        return "Noch keine verfolgten Tipps. Schick einen Screenshot von deinem Wettschein."
+    lines = [title]
+    for it in sorted(items, key=lambda i: i.get("kickoff") or ""):
+        icon = "⏳" if not it["done"] else "🟢" if it["won"] else "🔴" if it["won"] is False else "⚪"
+        score = f" {it['score']}" if it.get("score") else ""
+        lines.append(f"{icon} <b>{it['match']}</b>{score} · {html.escape(it['label'])}")
+    won = sum(1 for i in items if i["done"] and i["won"])
+    decided = sum(1 for i in items if i["done"] and i["won"] is not None)
+    if decided:
+        lines.append(f"<b>{won} von {decided} gewonnen</b>")
+    return "\n".join(lines)
+
+
 def format_slip(rows: list[dict], checks: list[dict], book: str = "Sporttip") -> str:
     """Antwort auf einen Screenshot: pro Tipp 🟢 geht auf / 🔴 geht nicht auf – mit Grund aus der Recherche."""
     name = book if book != "andere" else "Wett"
@@ -438,6 +454,7 @@ COMMANDS = [
     ("tageskombi", "3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("risiko", "Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8"),
     ("krass", "Krass-Kombi: 3 BetBuilder, Quote ca. 8–25"),
+    ("ergebnisse", "Deine Tipps: 🟢 gewonnen / 🔴 verloren"),
     ("kosten", "Claude-Kosten heute"),
     ("sicher", "Tipps mit hoher Trefferquote"),
     ("heute", "Top-Tipps von heute (wie /top5)"),
@@ -487,7 +504,7 @@ def build(engine) -> Application | None:
                             "/krass – Krass-Kombi: 3 BetBuilder, Quote ca. 8–25\n"
                             "📸 Screenshot vom Wettschein schicken – die Agenten prüfen jeden Tipp: 🟢 geht auf / 🔴 nicht\n"
                             "/sicher – Tipps mit hoher Trefferquote (Über/Unter, 1X …)\n"
-                            "/kosten – Claude-Kosten heute\n/bilanz – Bilanz\n/gesetzt Nr Einsatz Quote – Wette erfassen (z. B. /gesetzt S3 10 1.45)\n"
+                            "/ergebnisse – deine Tipps: 🟢 gewonnen / 🔴 verloren\n/kosten – Claude-Kosten heute\n/bilanz – Bilanz\n/gesetzt Nr Einsatz Quote – Wette erfassen (z. B. /gesetzt S3 10 1.45)\n"
                             "/update – neu berechnen")
 
     async def cmd_today(update: Update, _ctx):
@@ -567,6 +584,11 @@ def build(engine) -> Application | None:
         await reply(update, format_day_combos({**plan, "day_combos": combos}, max_days=2) if combos
                     else "Keine Krass-Kombi möglich (zu wenige Spiele mit 55–70 % an einem Tag).")
 
+    async def cmd_results(update: Update, _ctx):
+        from fussball import tracking
+
+        await reply(update, format_results(tracking.recent(engine)))
+
     async def cmd_costs(update: Update, _ctx):
         from fussball.agents import runner
 
@@ -613,6 +635,9 @@ def build(engine) -> Application | None:
             items = [{"match_id": r.get("match_id"), "match": r["match"], "kickoff": r.get("kickoff"),
                       "comp": r.get("comp", ""), "label": r["leg"].market_text} for r in rows]
             checks = runner.check_tips(engine, items, client=client, local_time=state.local)
+            from fussball import tracking
+
+            tracking.track(engine, rows)
             return data, rows, checks
 
         try:
@@ -629,7 +654,8 @@ def build(engine) -> Application | None:
             await reply(update, "Auf dem Bild habe ich keine Wetten mit Quoten gefunden. Bitte den Sporttip-Schein "
                                 "oder die Spielliste mit Quoten fotografieren.")
             return
-        await reply(update, format_slip(rows, checks, data.bookmaker))
+        await reply(update, format_slip(rows, checks, data.bookmaker)
+                    + "\n\n<i>📋 Ich melde mich nach den Spielen mit 🟢 gewonnen / 🔴 verloren (/ergebnisse).</i>")
 
     async def cmd_update(update: Update, _ctx):
         await reply(update, "⟳ Aktualisiere Daten und Prognosen …")
@@ -641,7 +667,7 @@ def build(engine) -> Application | None:
     app.add_handler(CommandHandler("start", cmd_start))
     for name, fn in (("heute", cmd_today), ("top5", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update),
-                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("kosten", cmd_costs)):
+                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("kosten", cmd_costs), ("ergebnisse", cmd_results)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     app.add_handler(MessageHandler((filters.PHOTO | filters.Document.IMAGE) & only_owner, on_photo))
     return app

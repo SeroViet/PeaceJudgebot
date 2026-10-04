@@ -110,3 +110,67 @@ def test_german_names_match_english_data():
         leg("Norwegen – Endergebnis", [part("1X2", "A")], 1.5, None, home="Wales", away="Norwegen")])
     rows = slip.evaluate(data, fs)
     assert [r.get("match_id") for r in rows] == [1, 2, 3] and all(r["prob"] for r in rows)
+
+
+def test_tracking_green_red(engine, fixture_bytes, bundesliga):
+    from sqlalchemy import select
+
+    from fussball import tracking
+    from fussball.data import football_data as fd
+    from fussball.data.db import session_scope
+    from fussball.data.schema import Match
+
+    with session_scope(engine) as s:
+        fd.import_season(s, bundesliga, "2627", fixture_bytes("D1_2627_sample.csv"))
+        m1, m2 = s.scalars(select(Match)).all()[:2]
+        for m in (m1, m2):
+            m.status, m.ft_home, m.ft_away, m.ht_home, m.ht_away = "scheduled", None, None, None, None
+        ids = (m1.id, m2.id)
+    rows = [{"leg": leg("Über 1.5 Tore", [part("OU", "O", 1.5)], 1.3, ids[0]), "match_id": ids[0], "match": "A – B"},
+            {"leg": leg("1X", [part("DC", "1X")], 1.2, ids[1]), "match_id": ids[1], "match": "C – D"},
+            {"leg": leg("Torschütze", [part("andere", "")], 2.0, None), "match_id": None, "match": "E – F"}]
+    assert tracking.track(engine, rows) == 2 and tracking.track(engine, rows) == 0  # nicht doppelt
+    assert tracking.settle(engine) == []  # noch nicht gespielt
+    with session_scope(engine) as s:
+        a, b = s.get(Match, ids[0]), s.get(Match, ids[1])
+        a.status, a.ft_home, a.ft_away = "finished", 2, 1
+        b.status, b.ft_home, b.ft_away = "finished", 0, 1
+    done = tracking.settle(engine)
+    assert [d["won"] for d in done] == [True, False]
+    text = telegram_bot.format_results(done)
+    assert "🟢 <b>A – B</b> 2:1 · Über 1.5 Tore" in text and "🔴 <b>C – D</b> 0:1 · 1X" in text
+    assert "1 von 2 gewonnen" in text and "fair" not in text
+    batches = tracking.finished_batches(engine)
+    assert len(batches) == 1 and len(batches[0][1]) == 2  # eine Meldung, wenn alle Spiele des Scheins fertig sind
+    assert tracking.finished_batches(engine) == []  # nur einmal melden
+
+
+def test_bot_top_tips_tracked_per_day(engine, fixture_bytes, bundesliga):
+    from sqlalchemy import select
+
+    from fussball import tracking
+    from fussball.data import football_data as fd
+    from fussball.data.db import session_scope
+    from fussball.data.schema import Match
+
+    with session_scope(engine) as s:
+        fd.import_season(s, bundesliga, "2627", fixture_bytes("D1_2627_sample.csv"))
+        m1, m2 = s.scalars(select(Match)).all()[:2]
+        for m, sc in ((m1, (1, 1)), (m2, None)):
+            m.status = "scheduled" if sc is None else "finished"
+            m.ft_home, m.ft_away = sc if sc else (None, None)
+            m.ht_home, m.ht_away = (0, 1) if sc else (None, None)
+        ids = (m1.id, m2.id)
+    tips = [{"match_id": ids[0], "match": "A – B", "kickoff": "2026-10-04T13:00:00", "label": "1. Halbzeit: X2",
+             "market": "H1_DC", "selection": "X2"},
+            {"match_id": ids[1], "match": "C – D", "kickoff": "2026-10-04T18:00:00", "label": "Über 1.5 Tore",
+             "market": "OU1.5", "selection": "O"}]
+    assert tracking.track_tips(engine, tips, "2026-10-04") == 2
+    tracking.settle(engine)
+    assert tracking.finished_batches(engine) == []  # zweites Spiel läuft noch → noch keine Meldung
+    with session_scope(engine) as s:
+        m = s.get(Match, ids[1])
+        m.status, m.ft_home, m.ft_away = "finished", 0, 1
+    tracking.settle(engine)
+    (title, items), = tracking.finished_batches(engine)
+    assert "Top-Tipps 04.10." in title and [i["won"] for i in items] == [True, False]

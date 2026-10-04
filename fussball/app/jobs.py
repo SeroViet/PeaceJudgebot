@@ -65,6 +65,22 @@ async def _keep_awake(base_url: str, every_s: int = 600):
             log.warning("Keep-awake fehlgeschlagen: %s", exc)
 
 
+def _track_top(engine, plan: dict) -> None:
+    """Verschickte Top-Tipps merken: nach dem letzten Spiel kommt 🟢/🔴 pro Spiel."""
+    if engine is None:
+        return
+    from datetime import datetime
+
+    from fussball import tracking
+
+    try:
+        day = datetime.now(state.TZ).date().isoformat()
+        tips = [t for ts in telegram_bot.top_tips(plan).values() for t in ts]
+        tracking.track_tips(engine, tips, day)
+    except Exception:  # noqa: BLE001
+        log.exception("Top-Tipps konnten nicht gemerkt werden")
+
+
 async def _restore_costs(engine) -> None:
     """Tageskosten aus der angehefteten Nachricht übernehmen (überlebt Neustarts auf dem Gratisplan)."""
     from fussball.agents import runner
@@ -139,6 +155,8 @@ async def _refresh_loop(engine):
             plan = state.load_plan()
             for c in info.get("combo_results", []):
                 await telegram_bot.notify(_bot, telegram_bot.format_combo_result(c))
+            for title, items in info.get("tracked_results", []):
+                await telegram_bot.notify(_bot, telegram_bot.format_results(items, title))
             # Nur die Spiele: Hat der Scout Spiele der heutigen Kombi ersetzt, neue Kombi senden
             if not first and any(a.get("removed") and not a.get("cached") for a in info.get("agent", [])):
                 await telegram_bot.notify(_bot, "🔁 <b>Tageskombi angepasst</b> (Scout hat Spiele ersetzt)\n\n"
@@ -152,6 +170,7 @@ async def _refresh_loop(engine):
             if first:
                 first = False
                 await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
+                _track_top(engine, plan)
         except Exception as exc:  # noqa: BLE001
             log.exception("Refresh fehlgeschlagen")
             await telegram_bot.notify(_bot, f"⚠️ Aktualisierung fehlgeschlagen: {exc!r}"[:500])
@@ -186,6 +205,7 @@ async def _daily_loop(engine=None):
             await asyncio.sleep(30)
         plan = state.load_plan()
         await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
+        _track_top(engine, plan)
         if os.getenv("DAILY_FULL", "0") == "1":  # ausführliche Kombis nur auf Wunsch, sonst /tageskombi
             await telegram_bot.notify(_bot, "☀️ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))
         # Kosten stehen in der angehefteten Nachricht 📌 und unter /kosten – keine Extra-Nachricht

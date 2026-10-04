@@ -325,7 +325,7 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
                 out["scores"][sport] = import_scores(s, client, sport)
             st["spent"] += 2
         for sport, title, n in upcoming_counts(client, hours):
-            if is_women(sport, title):  # kein Frauenfussball – spart Credits
+            if not region_ok(sport, title):  # kein Frauenfussball, nur Europa – spart Credits
                 continue
             last = st["last"].get(sport)
             if last and utcnow() - datetime.fromisoformat(last) < timedelta(hours=interval):
@@ -494,6 +494,27 @@ def category(comp: str, comp_name: str | None = None) -> str:
         if any(w in text for w in words):
             return cat
     return "andere"
+
+
+# Nationalteams ausserhalb Europas (und Testspiele: viel Rotation, unsicher)
+_NON_EUROPE_NATIONAL = ("copa_america", "africa_cup", "asian_cup", "gold_cup", "south_america", "conmebol",
+                        "concacaf", "asia", "africa", "oceania", "friendl", "olympic")
+EUROPE_CATS = {"national", "europa", "liga_eu"}
+
+
+def region_ok(comp: str, comp_name: str | None = None) -> bool:
+    """Nur Europa (TIP_REGIONS=europa, Standard): europäische Ligen, Europapokal und europäische
+    Nationalteams (Nations League, EM/WM-Quali Europa). Keine Ligen aus Asien, Süd-/Nordamerika.
+    TIP_REGIONS=welt schaltet alles frei."""
+    cat = category(comp, comp_name)
+    if cat == "frauen":
+        return False
+    if os.getenv("TIP_REGIONS", "europa").lower() != "europa":
+        return True
+    if cat not in EUROPE_CATS:
+        return False
+    text = f"{comp} {comp_name or ''}".lower().replace(" ", "_").replace("-", "_")
+    return not (cat == "national" and any(w in text for w in _NON_EUROPE_NATIONAL))
 
 
 def is_women(comp: str, comp_name: str | None = None) -> bool:
@@ -1140,7 +1161,7 @@ def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | N
     world = {f.match_id: f for f in market_forecasts(engine, hours=24 * days)}
     world.update({f.match_id: f for f in forecasts if f.implied})
     # Kein Frauenfussball
-    all_fc = sorted((f for f in world.values() if not is_women(f.comp, f.comp_name)), key=lambda f: f.kickoff_utc)
+    all_fc = sorted((f for f in world.values() if region_ok(f.comp, f.comp_name)), key=lambda f: f.kickoff_utc)
     try:
         mark_last_meetings(engine, all_fc)
     except Exception:  # noqa: BLE001 – ohne Duell-Daten weiterarbeiten

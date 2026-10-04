@@ -186,11 +186,28 @@ def test_no_womens_football_in_plan(engine, monkeypatch):
     fs = [MatchForecast(i, code, name, datetime(2026, 10, 10, 12 + i, 0), f"H{i}", f"A{i}", 1.5, 1.0, {}, {}, {},
                         None, None, 0.0, {}, implied={"OU1.5": {"O": 0.82, "U": 0.18}})
           for i, (code, name) in enumerate([("soccer_uefa_champs_league_women", "UCL Women")] * 3
-                                           + [("soccer_usa_mls", "MLS")] * 3)]
+                                           + [("soccer_epl", "EPL")] * 3)]
     monkeypatch.setattr(service, "market_forecasts", lambda engine, hours: fs)
     plan = service.daily_plan(engine, days=3, forecasts=[])
-    assert {f.comp for f in plan.all_forecasts} == {"soccer_usa_mls"}
-    assert all(c["cat"] == "nordamerika" for c in plan.day_combos)
+    assert {f.comp for f in plan.all_forecasts} == {"soccer_epl"}
+    assert all(c["cat"] == "liga_eu" for c in plan.day_combos)
+
+
+def test_only_europe(monkeypatch):
+    from fussball.service import region_ok
+
+    assert region_ok("soccer_uefa_nations_league", "UEFA Nations League")
+    assert region_ok("soccer_uefa_europa_league", "UEFA Europa League")
+    assert region_ok("soccer_epl", "EPL") and region_ok("D1", None)
+    assert region_ok("soccer_fifa_world_cup_qualifiers_europe", "FIFA World Cup Qualifiers - Europe")
+    for comp, name in (("soccer_japan_j_league", "J League"), ("soccer_brazil_campeonato", "Brazil Série A"),
+                       ("soccer_argentina_primera_division", "Primera División - Argentina"),
+                       ("soccer_usa_mls", "MLS"), ("soccer_fifa_world_cup_qualifiers_south_america", "WC Qual SA"),
+                       ("soccer_international_friendlies", "International Friendlies"),
+                       ("soccer_uefa_champs_league_women", "UCL Women")):
+        assert not region_ok(comp, name), comp
+    monkeypatch.setenv("TIP_REGIONS", "welt")
+    assert region_ok("soccer_japan_j_league", "J League")
 
 
 def test_match_type_decides_the_tip():

@@ -206,8 +206,10 @@ def test_only_europe(monkeypatch):
                        ("soccer_international_friendlies", "International Friendlies"),
                        ("soccer_uefa_champs_league_women", "UCL Women")):
         assert not region_ok(comp, name), comp
+    assert not region_ok("soccer_club_friendlies", "Club Friendlies")
     monkeypatch.setenv("TIP_REGIONS", "welt")
     assert region_ok("soccer_japan_j_league", "J League")
+    assert not region_ok("soccer_international_friendlies", "International Friendlies")  # Testspiele nie
 
 
 def test_match_type_decides_the_tip():

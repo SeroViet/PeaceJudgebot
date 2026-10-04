@@ -500,6 +500,7 @@ def category(comp: str, comp_name: str | None = None) -> str:
 _NON_EUROPE_NATIONAL = ("copa_america", "africa_cup", "asian_cup", "gold_cup", "south_america", "conmebol",
                         "concacaf", "asia", "africa", "oceania", "friendl", "olympic")
 EUROPE_CATS = {"national", "europa", "liga_eu"}
+_FRIENDLIES = ("friendl", "freundschaft", "testspiel", "club_friend")
 
 
 def region_ok(comp: str, comp_name: str | None = None) -> bool:
@@ -507,13 +508,13 @@ def region_ok(comp: str, comp_name: str | None = None) -> bool:
     Nationalteams (Nations League, EM/WM-Quali Europa). Keine Ligen aus Asien, Süd-/Nordamerika.
     TIP_REGIONS=welt schaltet alles frei."""
     cat = category(comp, comp_name)
-    if cat == "frauen":
+    text = f"{comp} {comp_name or ''}".lower().replace(" ", "_").replace("-", "_")
+    if cat == "frauen" or any(w in text for w in _FRIENDLIES):  # nie Frauen, nie Testspiele
         return False
     if os.getenv("TIP_REGIONS", "europa").lower() != "europa":
         return True
     if cat not in EUROPE_CATS:
         return False
-    text = f"{comp} {comp_name or ''}".lower().replace(" ", "_").replace("-", "_")
     return not (cat == "national" and any(w in text for w in _NON_EUROPE_NATIONAL))
 
 

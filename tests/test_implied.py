@@ -247,3 +247,34 @@ def test_league_favourite_still_prefers_team_over_15():
                       implied_rates=(lam, mu))
     tip = best_tip_per_match([f], 0.55, 0.90)[0]
     assert (tip["market"], tip["selection"]) == ("HOME1.5", "O")
+
+
+def test_last_meeting_blocks_goal_tips(engine):
+    from datetime import timedelta
+
+    from fussball.data.db import session_scope
+    from fussball.data.schema import Competition, Match, Team
+    from fussball.models.builder import halftime_markets
+    from fussball.service import best_tip_per_match, mark_last_meetings
+
+    with session_scope(engine) as s:
+        c = Competition(code="UNL", name="UEFA Nations League", kind="international")
+        gre, ger = Team(name="Griechenland", is_national=True), Team(name="Deutschland", is_national=True)
+        s.add_all([c, gre, ger])
+        s.flush()
+        kick = datetime(2026, 10, 4, 18, 45)
+        s.add(Match(competition_id=c.id, season="2026-27", kickoff_utc=kick - timedelta(days=7), status="finished",
+                    home_team_id=ger.id, away_team_id=gre.id, ft_home=0, ft_away=1, source="test"))
+        nxt = Match(competition_id=c.id, season="2026-27", kickoff_utc=kick, home_team_id=gre.id, away_team_id=ger.id, source="test")
+        s.add(nxt)
+        s.flush()
+        mid = nxt.id
+    lam, mu = 1.0, 2.2  # Markt: Deutschland klarer Favorit
+    f = MatchForecast(mid, "soccer_uefa_nations_league", "UEFA Nations League", kick, "Griechenland", "Deutschland",
+                      lam, mu, {}, {}, {}, None, None, 0.0, {},
+                      implied={**implied_markets(lam, mu), **halftime_markets(lam, mu)}, implied_rates=(lam, mu))
+    mark_last_meetings(engine, [f])
+    assert f.last_meeting == (1, 0)  # aus Sicht des Heimteams Griechenland
+    tips = best_tip_per_match([f], 0.45, 0.95)
+    picked = {(a["market"], a["selection"]) for a in [tips[0], *tips[0]["alternatives"]]}
+    assert not picked & {("OU1.5", "O"), ("OU2.5", "O"), ("AWAY1.5", "O"), ("BTTS", "Y")}

@@ -172,6 +172,7 @@ class MatchForecast:
     ou_ok: bool = False  # Tipps auf Über/Unter nur mit eigener Referenz
     implied: dict[str, dict[str, float]] = field(default_factory=dict)  # alle Märkte aus Pinnacle
     implied_rates: tuple[float, float] | None = None
+    last_meeting: tuple[int, int] | None = None  # Tore (dieses Heimteam, dieses Gastteam) im letzten Duell
 
     def fair(self, sel: str) -> float:
         p = self.probs_1x2.get(sel) or self.probs_ou.get(sel)
@@ -559,6 +560,15 @@ def _rules(f: MatchForecast) -> tuple[str, set, set]:
     prof, prefer, block = profile_rules(*f.implied_rates) if f.implied_rates else ("normal", set(), set())
     if prof != "zaeh":  # Unter 4.5 nur in zähen Spielen (im Backtest 83 % erwartet → 83 % getroffen)
         block = block | {("OU4.5", "U")}
+    lm = getattr(f, "last_meeting", None)
+    if lm is not None:
+        # Letztes direktes Duell (bis 120 Tage zurück): torarm → keine Tore-Tipps; wer nicht traf → kein Team über 1.5
+        if sum(lm) <= 1:
+            block = block | _GOAL_OVERS | {("OU1.5", "O"), ("H1_OU0.5", "O")}
+        if lm[0] == 0:
+            block = block | {("HOME1.5", "O")}
+        if lm[1] == 0:
+            block = block | {("AWAY1.5", "O")}
     if category(f.comp, getattr(f, "comp_name", None)) == "national":
         # Länderspiele: Aussenseiter mauern oft (Griechenland – Deutschland 0:0 trotz 15:3 Schüssen).
         # Teamtore ohne Bonus; auswärts nur, wenn sehr klar.
@@ -1080,6 +1090,30 @@ class DailyPlan:
     top: list[dict] = field(default_factory=list)  # bester Tipp pro Spiel (für /top5)
 
 
+def mark_last_meetings(engine: Engine, forecasts: list[MatchForecast], days: int = 120) -> None:
+    """Letztes direktes Duell derselben Teams (beendet, höchstens `days` alt) an die Prognose hängen.
+    Beispiel: Deutschland – Griechenland 0:1 eine Woche vor Griechenland – Deutschland."""
+    ids = [f.match_id for f in forecasts]
+    if not ids:
+        return
+    with session_scope(engine) as s:
+        upcoming = {m.id: m for m in s.scalars(select(Match).where(Match.id.in_(ids)))}
+        for f in forecasts:
+            m = upcoming.get(f.match_id)
+            if m is None:
+                continue
+            h, a = m.home_team_id, m.away_team_id
+            prev = s.scalars(select(Match).where(
+                Match.status == "finished", Match.ft_home.is_not(None), Match.id != m.id,
+                Match.kickoff_utc < m.kickoff_utc, Match.kickoff_utc >= m.kickoff_utc - timedelta(days=days),
+                ((Match.home_team_id == h) & (Match.away_team_id == a))
+                | ((Match.home_team_id == a) & (Match.away_team_id == h)))
+                .order_by(Match.kickoff_utc.desc())).first()
+            if prev is not None:
+                f.last_meeting = ((prev.ft_home, prev.ft_away) if prev.home_team_id == h
+                                  else (prev.ft_away, prev.ft_home))
+
+
 def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | None = None) -> DailyPlan:
     cfg = get_config(engine)
     if forecasts is None:
@@ -1095,6 +1129,10 @@ def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | N
     world.update({f.match_id: f for f in forecasts if f.implied})
     # Kein Frauenfussball
     all_fc = sorted((f for f in world.values() if not is_women(f.comp, f.comp_name)), key=lambda f: f.kickoff_utc)
+    try:
+        mark_last_meetings(engine, all_fc)
+    except Exception:  # noqa: BLE001 – ohne Duell-Daten weiterarbeiten
+        log.exception("Letzte Duelle nicht ermittelt")
     sc = cfg.get("safe", {})
     safe = safe_tips(all_fc, sc.get("min_prob", 0.70), sc.get("max_prob", 0.90), sc.get("per_match", 2))
     dc = cfg.get("day_combo", {})

@@ -138,7 +138,8 @@ def test_tracking_green_red(engine, fixture_bytes, bundesliga):
     done = tracking.settle(engine)
     assert [d["won"] for d in done] == [True, False]
     text = telegram_bot.format_results(done)
-    assert "🟢 <b>A – B</b> 2:1 · Über 1.5 Tore" in text and "🔴 <b>C – D</b> 0:1 · 1X" in text
+    assert "🟢 <b>A – B</b>\n" in text and "🔴 <b>C – D</b>\n" in text  # nur die Namen
+    assert "Über 1.5" not in text and "2:1" not in text
     assert "1 von 2 gewonnen" in text and "fair" not in text
     batches = tracking.finished_batches(engine)
     assert len(batches) == 1 and len(batches[0][1]) == 2  # eine Meldung, wenn alle Spiele des Scheins fertig sind

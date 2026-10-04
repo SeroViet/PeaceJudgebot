@@ -266,14 +266,13 @@ def verdict(row: dict, check: dict) -> tuple[bool | None, str]:
 
 
 def format_results(items: list[dict], title: str = "📋 <b>Ergebnisse</b>") -> str:
-    """Nur die Spiele: 🟢 gewonnen, 🔴 verloren, ⚪ nicht auswertbar, ⏳ läuft noch."""
+    """Nur die Spiele mit Namen: 🟢 Tipp gewonnen, 🔴 verloren, ⚪ nicht auswertbar, ⏳ läuft noch."""
     if not items:
         return "Noch keine verfolgten Tipps. Schick einen Screenshot von deinem Wettschein."
     lines = [title]
     for it in sorted(items, key=lambda i: i.get("kickoff") or ""):
         icon = "⏳" if not it["done"] else "🟢" if it["won"] else "🔴" if it["won"] is False else "⚪"
-        score = f" {it['score']}" if it.get("score") else ""
-        lines.append(f"{icon} <b>{it['match']}</b>{score} · {html.escape(it['label'])}")
+        lines.append(f"{icon} <b>{html.escape(it['match'])}</b>")
     won = sum(1 for i in items if i["done"] and i["won"])
     decided = sum(1 for i in items if i["done"] and i["won"] is not None)
     if decided:

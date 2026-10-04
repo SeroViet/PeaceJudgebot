@@ -76,7 +76,8 @@ def _track_top(engine, plan: dict) -> None:
 
     try:
         day = datetime.now(state.TZ).date().isoformat()
-        tips = [t for ts in telegram_bot.top_tips(plan).values() for t in ts]
+        # nur die geprüften 🟢-Tipps, die du wirklich bekommen hast (nicht die ungeprüfte Liste nach einem Neustart)
+        tips = [t for ts in telegram_bot.top_tips(plan).values() for t in ts if t.get("agent") == "bestätigt"]
         tracking.track_tips(engine, tips, day)
     except Exception:  # noqa: BLE001
         log.exception("Top-Tipps konnten nicht gemerkt werden")
@@ -154,8 +155,8 @@ async def _refresh_loop(engine):
         try:
             info = await loop.run_in_executor(None, lambda: state.refresh(engine, days=int(os.getenv("TIP_DAYS", "3"))))
             plan = state.load_plan()
-            for c in info.get("combo_results", []):
-                await telegram_bot.notify(_bot, telegram_bot.format_combo_result(c))
+            for c in info.get("combo_results", []) if os.getenv("DAILY_FULL", "0") == "1" else []:
+                await telegram_bot.notify(_bot, telegram_bot.format_combo_result(c))  # nur wenn Kombis verschickt
             for title, items in info.get("tracked_results", []):
                 await telegram_bot.notify(_bot, telegram_bot.format_results(items, title))
             # Nur die Spiele: Hat der Scout Spiele der heutigen Kombi ersetzt, neue Kombi senden

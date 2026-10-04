@@ -151,18 +151,20 @@ def test_categories_never_mixed():
     assert category("soccer_uefa_nations_league", "UEFA Nations League") == "national"
     assert category("soccer_fifa_world_cup_qualifiers_europe") == "national"
     assert category("soccer_uefa_champs_league", "UEFA Champions League") == "europa"
-    assert category("soccer_uefa_europa_league") == "europa"
-    assert category("D1", "Bundesliga") == "liga" and category("soccer_usa_mls", "MLS") == "liga"
+    assert category("D1", "Bundesliga") == "liga_eu" and category("soccer_epl", "EPL") == "liga_eu"
+    assert category("soccer_argentina_primera_division", "Primera División - Argentina") == "suedamerika"
+    assert category("soccer_brazil_campeonato", "Brazil Série A") == "suedamerika"  # nicht Italien
+    assert category("soccer_usa_mls", "MLS") == "nordamerika"
+    assert category("soccer_japan_j_league", "J League") == "asien"
     fs = []
     for i, (code, name) in enumerate([("soccer_uefa_nations_league", "UEFA Nations League")] * 3
-                                     + [("soccer_uefa_champs_league_women", "UEFA Champions League Women")] * 3):
+                                     + [("soccer_argentina_primera_division", "Primera División")] * 3):
         fs.append(MatchForecast(i, code, name, datetime(2026, 10, 10, 12 + i, 0), f"H{i}", f"A{i}", 1.5, 1.0, {}, {},
                                 {}, None, None, 0.0, {}, implied={"OU1.5": {"O": 0.82, "U": 0.18}}))
     combos = day_combos(fs, sizes=(3,))
-    assert {c["cat"] for c in combos} == {"national", "frauen"}
+    assert {c["cat"] for c in combos} == {"national", "suedamerika"}
     for c in combos:
         assert len({category(l["comp"], l["comp_name"]) for l in c["legs"]}) == 1  # nie gemischt
-
 
 def test_halftime_tips_available_and_calibrated_markets_only():
     from fussball.models.builder import halftime_markets
@@ -176,3 +178,16 @@ def test_halftime_tips_available_and_calibrated_markets_only():
                       implied={"H1_DC": {"1X": 0.80, "X2": 0.70, "12": 0.5}, "OU2.5": {"O": 0.5, "U": 0.5}})
     tip = best_tip_per_match([f], 0.75, 0.88)[0]
     assert tip["market"] == "H1_DC" and tip["label"].startswith("1. Halbzeit: 1X")
+
+
+def test_no_womens_football_in_plan(engine, monkeypatch):
+    from fussball import service
+
+    fs = [MatchForecast(i, code, name, datetime(2026, 10, 10, 12 + i, 0), f"H{i}", f"A{i}", 1.5, 1.0, {}, {}, {},
+                        None, None, 0.0, {}, implied={"OU1.5": {"O": 0.82, "U": 0.18}})
+          for i, (code, name) in enumerate([("soccer_uefa_champs_league_women", "UCL Women")] * 3
+                                           + [("soccer_usa_mls", "MLS")] * 3)]
+    monkeypatch.setattr(service, "market_forecasts", lambda engine, hours: fs)
+    plan = service.daily_plan(engine, days=3, forecasts=[])
+    assert {f.comp for f in plan.all_forecasts} == {"soccer_usa_mls"}
+    assert all(c["cat"] == "nordamerika" for c in plan.day_combos)

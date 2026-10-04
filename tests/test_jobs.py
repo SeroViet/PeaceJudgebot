@@ -98,9 +98,9 @@ def test_top5_short_and_by_category():
     safe = [{"match_id": i, "match": f"H{i} – A{i}", "kickoff": kick, "comp": comp, "comp_name": name,
              "market": "OU1.5", "selection": "O", "label": "Über 1.5 Tore", "prob": 0.8 + i / 100}
             for i, (comp, name) in enumerate([("soccer_uefa_nations_league", "UEFA Nations League")] * 6
-                                             + [("soccer_uefa_champs_league_women", "UCL Women")] * 2)]
+                                             + [("soccer_argentina_primera_division", "Primera División")] * 2)]
     safe.append({**safe[0], "market": "OU4.5", "selection": "U", "label": "Unter 4.5 Tore", "prob": 0.89})
     text = telegram_bot.format_top5({"safe": safe, "day_combos": [], "risky_combos": [], "krass_combos": []})
-    assert "🌍 Länderspiele" in text and "👩 Frauen" in text
+    assert "🌍 Länderspiele" in text and "🌎 Südamerika" in text
     assert text.count("➡️") == 7  # 5 Länderspiele + 2 Frauen, ein Tipp pro Spiel
     assert "Unter 4.5" not in text and len(text) < 1500

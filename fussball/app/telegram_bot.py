@@ -58,7 +58,9 @@ def tip(label: str) -> str:
     return f"<code>{html.escape(label)}</code>"
 
 
-SHORT_CAT = {"frauen": "👩 Frauen", "national": "🌍 Länderspiele", "europa": "🏆 Europapokal", "liga": "⚽ Ligen"}
+SHORT_CAT = {"national": "🌍 Länderspiele", "europa": "🏆 Europapokal", "liga_eu": "🇪🇺 Ligen Europa",
+             "suedamerika": "🌎 Südamerika", "nordamerika": "🇺🇸 Nordamerika", "asien": "🌏 Asien & Australien",
+             "andere": "⚽ Andere Ligen"}
 
 
 def top_tips(plan: dict, n: int = 5, day: str | None = None) -> dict[str, list[dict]]:
@@ -98,7 +100,7 @@ def format_top5(plan: dict, n: int = 5) -> str:
         return "📭 Heute keine sicheren Tipps mehr. Morgen früh kommen neue."
     icon = {"bestätigt": " 🟢", "vorsicht": " 🔴"}
     out = ["🔥 <b>Top-Tipps heute</b>"]
-    for cat in ("frauen", "national", "europa", "liga"):
+    for cat in SHORT_CAT:
         ts = groups.get(cat)
         if not ts:
             continue
@@ -287,12 +289,13 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
     out = []
     for day in days:
         day_combos = sorted([c for c in combos if c["day"] == day],
-                            key=lambda c: (order.index(c.get("cat", "liga")), kind(c), c["size"]))
+                            key=lambda c: (order.index(c["cat"]) if c.get("cat") in order else 99, kind(c),
+                                           c["size"]))
         shown_cat = None
         for c in day_combos:
-            cat = c.get("cat", "liga")
-            if cat != shown_cat and len({x.get("cat", "liga") for x in combos}) > 1:
-                out.append(f"━━━━━━━━━━━━━━━\n<b>{CATEGORIES[cat]}</b>")
+            cat = c.get("cat", "andere")
+            if cat != shown_cat and len({x.get("cat", "andere") for x in combos}) > 1:
+                out.append(f"━━━━━━━━━━━━━━━\n<b>{CATEGORIES.get(cat, cat)}</b>")
                 shown_cat = cat
             d = _fmt_day(c["legs"][0]["kickoff"])
             icon = {"bestätigt": " 🟢", "vorsicht": " 🔴", "streichen": " 🔴"}

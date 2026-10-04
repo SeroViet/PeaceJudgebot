@@ -324,6 +324,8 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
                 out["scores"][sport] = import_scores(s, client, sport)
             st["spent"] += 2
         for sport, title, n in upcoming_counts(client, hours):
+            if is_women(sport, title):  # kein Frauenfussball – spart Credits
+                continue
             last = st["last"].get(sport)
             if last and utcnow() - datetime.fromisoformat(last) < timedelta(hours=interval):
                 continue
@@ -452,26 +454,49 @@ def safe_tips(forecasts: list[MatchForecast], min_prob: float = 0.70, max_prob: 
     return out
 
 
-# Wettbewerbs-Arten: Kombis werden nie gemischt (Frauen, Nationalteams, Europapokal, Ligen je für sich)
-CATEGORIES = {"frauen": "👩 Frauenfussball", "national": "🌍 Nationalteams (Nations League, WM, EM, Länderspiele)",
-              "europa": "🏆 Europapokal (Champions League, Europa League, Conference League)", "liga": "⚽ Ligen"}
+# Wettbewerbs-Arten: Kombis werden nie gemischt. Frauenfussball wird gar nicht getippt.
+CATEGORIES = {"national": "🌍 Nationalteams (Nations League, WM, EM, Länderspiele)",
+              "europa": "🏆 Europapokal (Champions League, Europa League, Conference League)",
+              "liga_eu": "🇪🇺 Ligen Europa", "suedamerika": "🌎 Südamerika", "nordamerika": "🇺🇸 Nordamerika",
+              "asien": "🌏 Asien & Australien", "andere": "⚽ Andere Ligen"}
 _WOMEN = ("women", "frauen", "femin", "wsl", "nwsl", "liga_f", "damallsvenskan", "toppserien")
 _NATIONAL = ("nations_league", "world_cup", "fifa_world", "uefa_euro_qual", "euro_qual", "uefa_euro",
              "copa_america", "africa_cup", "asian_cup", "gold_cup", "friendl", "international", "olympic")
-_CUPS = ("champs_league", "champions_league", "europa_league", "conference_league", "libertadores",
-         "sudamericana", "club_world_cup", "supercup", "super_cup")
+_UEFA_CUPS = ("champs_league", "champions_league", "europa_league", "conference_league", "uefa_super")
+_SOUTH = ("argentin", "brazil", "chile", "colombia", "peru", "uruguay", "ecuador", "paraguay", "bolivia",
+          "venezuela", "libertadores", "sudamericana", "conmebol")
+_NORTH = ("usa", "mls", "mexico", "liga_mx", "canada", "concacaf")
+_ASIA = ("japan", "j_league", "j1", "korea", "kleague", "china", "chinese", "saudi", "india", "thailand",
+         "australia", "a_league", "qatar", "uae", "iran")
+_EUROPE = ("epl", "england", "efl", "championship", "league_one", "league_two", "germany", "bundesliga", "spain",
+           "la_liga", "italy", "serie_a", "serie_b", "france", "ligue", "netherlands", "eredivisie", "portugal",
+           "primeira", "belgium", "scotland", "spl", "austria", "switzerland", "denmark", "sweden", "allsvenskan",
+           "norway", "eliteserien", "finland", "veikkaus", "poland", "ekstraklasa", "turkey", "super_lig", "greece",
+           "russia", "ukraine", "czech", "croatia", "serbia", "romania", "ireland", "hungary", "bulgaria",
+           "slovakia", "slovenia", "cyprus", "israel", "iceland")
+_FD_EUROPE = {"E0", "E1", "E2", "E3", "D1", "D2", "I1", "I2", "SP1", "SP2", "F1", "F2", "N1", "P1", "B1", "SC0", "T1",
+              "G1"}
 
 
 def category(comp: str, comp_name: str | None = None) -> str:
-    """frauen | national | europa | liga – aus dem Wettbewerbs-Code (z. B. Odds-API-Key) und Namen."""
+    """frauen | national | europa | liga_eu | suedamerika | nordamerika | asien | andere."""
+    if comp in _FD_EUROPE:
+        return "liga_eu"
     text = f"{comp} {comp_name or ''}".lower().replace(" ", "_").replace("-", "_")
     if any(w in text for w in _WOMEN):
         return "frauen"
-    if any(w in text for w in _CUPS):
+    if any(w in text for w in _UEFA_CUPS):
         return "europa"
     if any(w in text for w in _NATIONAL):
         return "national"
-    return "liga"
+    for cat, words in (("suedamerika", _SOUTH), ("nordamerika", _NORTH), ("asien", _ASIA), ("liga_eu", _EUROPE)):
+        if any(w in text for w in words):
+            return cat
+    return "andere"
+
+
+def is_women(comp: str, comp_name: str | None = None) -> bool:
+    return category(comp, comp_name) == "frauen"
 
 
 # Teamtore ("Bayern trifft", "Bayern über 1.5 Tore") sind im Backtest im Bereich 70–88 % genauso gut
@@ -828,9 +853,9 @@ def record_served(engine: Engine, combos: list[dict]) -> None:
         row = s.get(AppSetting, "served_combos")
         hist = dict(row.value) if row and isinstance(row.value, dict) else {}
         for c in combos:
-            key = f"{c['day']}_{c.get('cat', 'liga')}_{c['size']}"
+            key = f"{c['day']}_{c.get('cat', 'andere')}_{c['size']}"
             if key not in hist:
-                hist[key] = {"day": c["day"], "size": c["size"], "cat": c.get("cat", "liga"), "fair_odds": c["fair_odds"], "prob": c["prob"],
+                hist[key] = {"day": c["day"], "size": c["size"], "cat": c.get("cat", "andere"), "fair_odds": c["fair_odds"], "prob": c["prob"],
                              "legs": [{k: l[k] for k in ("match_id", "match", "market", "selection", "label")}
                                       for l in c["legs"]], "done": False}
         if row:
@@ -947,7 +972,8 @@ def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | N
     combos = build_combos(tips, cfg["combos"])
     world = {f.match_id: f for f in market_forecasts(engine, hours=24 * days)}
     world.update({f.match_id: f for f in forecasts if f.implied})
-    all_fc = sorted(world.values(), key=lambda f: f.kickoff_utc)
+    # Kein Frauenfussball
+    all_fc = sorted((f for f in world.values() if not is_women(f.comp, f.comp_name)), key=lambda f: f.kickoff_utc)
     sc = cfg.get("safe", {})
     safe = safe_tips(all_fc, sc.get("min_prob", 0.70), sc.get("max_prob", 0.90), sc.get("per_match", 2))
     dc = cfg.get("day_combo", {})

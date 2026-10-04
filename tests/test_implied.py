@@ -191,3 +191,27 @@ def test_no_womens_football_in_plan(engine, monkeypatch):
     plan = service.daily_plan(engine, days=3, forecasts=[])
     assert {f.comp for f in plan.all_forecasts} == {"soccer_usa_mls"}
     assert all(c["cat"] == "nordamerika" for c in plan.day_combos)
+
+
+def test_match_type_decides_the_tip():
+    from fussball.models.builder import halftime_markets
+    from fussball.service import best_tip_per_match, builder_legs, match_profile
+
+    def fc(i, lam, mu):
+        return MatchForecast(i, "soccer_uefa_nations_league", "UEFA Nations League", datetime(2026, 10, 4, 18, 45),
+                             f"H{i}", f"A{i}", lam, mu, {}, {}, {}, None, None, 0.0, {},
+                             implied={**implied_markets(lam, mu), **halftime_markets(lam, mu)}, implied_rates=(lam, mu))
+
+    greece_germany, nl_serbia, por_nor = fc(1, 1.00, 1.67), fc(2, 3.26, 0.59), fc(3, 2.40, 1.37)
+    assert [match_profile(*f.implied_rates) for f in (greece_germany, nl_serbia, por_nor)] == ["zaeh", "favorit", "offen"]
+    tips = {t["match_id"]: t for t in best_tip_per_match([greece_germany, nl_serbia, por_nor], 0.55, 0.90)}
+    # zähes Spiel: keine Tore-Tipps
+    assert (tips[1]["market"], tips[1]["selection"]) not in {("AWAY1.5", "O"), ("OU3.5", "O"), ("OU2.5", "O")}
+    assert all((a["market"], a["selection"]) != ("AWAY1.5", "O") for a in tips[1]["alternatives"])
+    # Favorit gegen Schwächeren: Favorit über 1.5
+    assert (tips[2]["market"], tips[2]["selection"]) == ("HOME1.5", "O")
+    # offenes Spiel: kein Unter-Tipp
+    assert tips[3]["selection"] != "U" and tips[3]["profile"] == "offen"
+    # BetBuilder im zähen Spiel ohne Tore-Teile
+    for leg in builder_legs([greece_germany], 0.3, 0.6):
+        assert not any(p[0] in ("OU", "AWAY", "HOME") and p[1] == "O" and p[2] >= 1.5 for p in leg["parts"])

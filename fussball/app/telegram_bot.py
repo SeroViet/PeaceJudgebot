@@ -108,7 +108,10 @@ def format_top5(plan: dict, n: int = 5) -> str:
         prob = 1.0
         for t in ts:
             prob *= t["prob"]
-            out.append(f"<b>{state.local(t['kickoff']).strftime('%H:%M')} {t['match']}</b>\n"
+            from fussball.service import PROFILE_TEXT
+
+            hint = f" <i>{PROFILE_TEXT[t['profile']]}</i>" if t.get("profile") in PROFILE_TEXT else ""
+            out.append(f"<b>{state.local(t['kickoff']).strftime('%H:%M')} {t['match']}</b>{hint}\n"
                        f"➡️ {tip(t['label'])} · {t['prob']:.0%}{icon.get(t.get('agent'), '')}"
                        + (f"\n<i>🔴 {html.escape(t['reason'])}</i>" if t.get("agent") == "vorsicht" and t.get("reason")
                           else ""))

@@ -517,6 +517,41 @@ def _is_goal_market(market: str) -> bool:
     return market.startswith(("OU", "HOME", "AWAY")) or market == "BTTS"
 
 
+# Spiel-Typ aus den erwarteten Toren (λ Heim, μ Gast): bestimmt, welche Tipps passen.
+PROFILE_TEXT = {"favorit": "💪 Favorit gegen Schwächeren", "offen": "🔥 offenes Spiel, viele Tore",
+                "zaeh": "🧱 zähes Spiel, wenig Tore"}
+PROFILE_BONUS = 0.08
+_GOAL_OVERS = {("OU2.5", "O"), ("OU3.5", "O"), ("BTTS", "Y"), ("HOME1.5", "O"), ("AWAY1.5", "O"), ("H1_OU1.5", "O")}
+
+
+def match_profile(lam: float, mu: float) -> str:
+    total, hi, lo = lam + mu, max(lam, mu), min(lam, mu)
+    if total < 2.7:
+        return "zaeh"
+    if hi >= 2.0 and lo <= 1.0:
+        return "favorit"
+    if total >= 3.0 and lo >= 1.1:
+        return "offen"
+    return "normal"
+
+
+def profile_rules(lam: float, mu: float) -> tuple[str, set, set]:
+    """(Typ, bevorzugte Tipps, gesperrte Tipps) als (Markt, Auswahl)."""
+    prof = match_profile(lam, mu)
+    fav_home = lam >= mu
+    if prof == "zaeh":  # wenig Tore: keine Tore-Tipps, lieber Unter / doppelte Chance
+        return prof, {("OU3.5", "U"), ("OU2.5", "U"), ("H1_OU1.5", "U"), ("DC", "1X" if fav_home else "X2")}, \
+            set(_GOAL_OVERS)
+    if prof == "favorit":  # ein Team trifft viel, das andere kaum: Favorit über 1.5, kein "beide treffen"
+        fav, dog = ("HOME", "AWAY") if fav_home else ("AWAY", "HOME")
+        return prof, {(f"{fav}1.5", "O"), ("1X2", "H" if fav_home else "A")}, \
+            {("BTTS", "Y"), (f"{dog}1.5", "O"), ("1X2", "A" if fav_home else "H"), ("OU2.5", "U")}
+    if prof == "offen":  # beide treffen, viele Tore: Über / beide treffen, kein Unter
+        return prof, {("OU2.5", "O"), ("BTTS", "Y"), ("OU1.5", "O")}, \
+            {("OU2.5", "U"), ("OU3.5", "U"), ("H1_OU1.5", "U")}
+    return prof, set(), set()
+
+
 def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob: float,
                        markets: tuple[str, ...] = COMBO_MARKETS, n_alternatives: int = 4,
                        exclude: set = EXCLUDED_TIPS) -> list[dict]:
@@ -527,9 +562,11 @@ def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob
 
     out = []
     for f in forecasts:
-        cands = [(p + (GOAL_BONUS if _is_goal_market(m) else 0.0), p, m, sel)
+        prof, prefer, block = profile_rules(*f.implied_rates) if f.implied_rates else ("normal", set(), set())
+        cands = [(p + (GOAL_BONUS if _is_goal_market(m) else 0.0) + (PROFILE_BONUS if (m, sel) in prefer else 0.0),
+                  p, m, sel)
                  for m, sels in (f.implied or {}).items() if m in markets for sel, p in sels.items()
-                 if min_prob <= p <= max_prob and (m, sel) not in exclude]
+                 if min_prob <= p <= max_prob and (m, sel) not in exclude and (m, sel) not in block]
         if not cands:
             continue
         cands.sort(reverse=True)
@@ -537,7 +574,7 @@ def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob
                                  "prob": p, "fair_odds": 1 / p}
         _, p, market, sel = cands[0]
         out.append({"match_id": f.match_id, "match": f"{f.home} – {f.away}", "kickoff": f.kickoff_utc.isoformat(),
-                    "comp": f.comp, "comp_name": f.comp_name, **tip(p, market, sel),
+                    "comp": f.comp, "comp_name": f.comp_name, **tip(p, market, sel), "profile": prof,
                     "alternatives": [tip(p, m, s) for _, p, m, s in cands[:n_alternatives]]})
     return out
 
@@ -630,7 +667,7 @@ def attach_book_odds(engine: Engine, combos: list[dict], books: list[str] | None
 # Risiko-Kombi: Tipps mit höherer Quote (60–72 %). Nur Märkte, die im Backtest in diesem Bereich
 # gut kalibriert sind: 1/2, Über/Unter 2.5, beide treffen "Ja" ("Nein" traf 5 Punkte zu selten).
 RISKY_MARKETS = ("1X2", "OU2.5", "BTTS")
-RISKY_EXCLUDED = EXCLUDED_TIPS | {("BTTS", "N")}
+RISKY_EXCLUDED = EXCLUDED_TIPS | {("BTTS", "N"), ("OU3.5", "O")}  # beide: im Backtest deutlich zu selten
 
 
 # Krass-Kombi: 5 Spiele mit 55–70 % pro Tipp → Gesamtquote ca. 8–12, geht etwa an 1 von 10 Tagen auf.
@@ -677,7 +714,10 @@ def builder_legs(forecasts: list[MatchForecast], min_prob: float, max_prob: floa
         if f.match_id in (skip or set()) or not f.implied_rates:
             continue
         lam, mu = f.implied_rates
-        found = best_builders(lam, mu, min_prob, max_prob)
+        prof, _prefer, block = profile_rules(lam, mu)
+        code = lambda p: (f"{p.market}{p.line:g}" if p.market in ("OU", "HOME", "AWAY") else p.market, p.selection)  # noqa: E731
+        found = [b for b in best_builders(lam, mu, min_prob, max_prob, top=6)
+                 if not any(code(p) in block for p in b.parts)][:3]
         if not found:
             continue
         legs = []
@@ -688,7 +728,7 @@ def builder_legs(forecasts: list[MatchForecast], min_prob: float, max_prob: floa
                          "parts": [[p.market, p.selection, p.line, p.half] for p in b.parts]})
         best = legs[0]
         out.append({"match_id": f.match_id, "match": f"{f.home} – {f.away}", "kickoff": f.kickoff_utc.isoformat(),
-                    "comp": f.comp, "comp_name": f.comp_name, **best,
+                    "comp": f.comp, "comp_name": f.comp_name, **best, "profile": prof,
                     "alternatives": [{k: v for k, v in x.items()} for x in legs]})
     return out
 

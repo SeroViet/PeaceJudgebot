@@ -79,7 +79,8 @@ def top_tips(plan: dict, n: int = 5, day: str | None = None) -> dict[str, list[d
     for t in plan.get("top") or plan.get("safe", []):
         k = state.local(t["kickoff"])
         if (k.date().isoformat() != day or k <= now or t["market"] not in COMBO_MARKETS
-                or (t["market"], t["selection"]) in EXCLUDED_TIPS or agent.get(t["match_id"]) == "streichen"):
+                or (t["market"], t["selection"]) in EXCLUDED_TIPS or agent.get(t["match_id"]) == "streichen"
+                or ((t["market"], t["selection"]) == ("OU4.5", "U") and t.get("profile") != "zaeh")):
             continue
         if t["prob"] > best.get(t["match_id"], {}).get("prob", 0):
             best[t["match_id"]] = {**t, "agent": agent.get(t["match_id"]),

@@ -103,6 +103,10 @@ gestützt werden, nimm den mit dem besten Verhältnis Sporttip-Quote zu fairer Q
 Die Fakten haben aber immer Vorrang – nie einen Tipp nur wegen der Quote wählen.
 Nenne keine eigenen Wahrscheinlichkeiten und keine Quoten.
 
+Bei Unter-Tipps (z. B. "Unter 3.5 / 4.5 Tore") prüfe besonders: Muss ein Team unbedingt gewinnen
+oder aufholen (offenes Spiel)? Kehren Torjäger zurück? Fehlen Stammverteidiger oder der Stammtorhüter?
+Gab es zuletzt torreiche direkte Duelle? Solche Fakten sprechen gegen einen Unter-Tipp.
+
 Regeln für die Bewertung:
 - Das Spiel findet zum angegebenen Termin statt. Zweifle Termin oder Ansetzung nie an.
 - "streichen" nur bei konkreten, gewichtigen Fakten gegen den Tipp (z. B. Torjäger und Ersatz fehlen

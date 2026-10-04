@@ -503,10 +503,10 @@ def is_women(comp: str, comp_name: str | None = None) -> bool:
 # kalibriert wie Über/Unter gesamt und bringen Abwechslung in die Kombi.
 # Keine 0.5-Linien fürs ganze Spiel ("Team trifft", "Über 0.5"): Quote zu tief, bringt nichts.
 # 1. Halbzeit (inkl. "1. HZ über 0.5") bleibt: im Backtest kalibriert (Handicap nicht → fehlt).
-COMBO_MARKETS = ("1X2", "DC", "OU1.5", "OU2.5", "OU3.5", "BTTS", "HOME1.5", "AWAY1.5",
-                 "H1_DC", "H1_OU0.5", "H1_OU1.5")
+COMBO_MARKETS = ("1X2", "DC", "OU1.5", "OU2.5", "OU3.5", "OU4.5", "BTTS", "HOME1.5", "AWAY1.5",
+                 "H1_DC", "H1_OU0.5", "H1_OU1.5")  # Unter 4.5 nur in zähen Spielen (siehe profile_rules)
 # Keine Tipps wie "12 (kein Unentschieden)", "X" oder "Team unter …": wenig aussagekräftig
-EXCLUDED_TIPS = {("DC", "12"), ("1X2", "D"), ("HOME0.5", "U"), ("AWAY0.5", "U"), ("HOME1.5", "U"), ("AWAY1.5", "U"),
+EXCLUDED_TIPS = {("DC", "12"), ("1X2", "D"), ("OU4.5", "O"), ("HOME0.5", "U"), ("AWAY0.5", "U"), ("HOME1.5", "U"), ("AWAY1.5", "U"),
                  ("H1_DC", "12"), ("H1_OU0.5", "U"), ("H1_OU1.5", "O")}
 MAX_SAME_TIP = 2  # höchstens 2× derselbe Tipp (z. B. "Über 1.5 Tore") pro Kombi
 # Tore-Tipps (Über/Unter, beide treffen) werden bevorzugt, solange sie nur wenig unsicherer sind
@@ -539,9 +539,9 @@ def profile_rules(lam: float, mu: float) -> tuple[str, set, set]:
     """(Typ, bevorzugte Tipps, gesperrte Tipps) als (Markt, Auswahl)."""
     prof = match_profile(lam, mu)
     fav_home = lam >= mu
-    if prof == "zaeh":  # wenig Tore: keine Tore-Tipps, lieber Unter / doppelte Chance
-        return prof, {("OU3.5", "U"), ("OU2.5", "U"), ("H1_OU1.5", "U"), ("DC", "1X" if fav_home else "X2")}, \
-            set(_GOAL_OVERS)
+    if prof == "zaeh":  # wenig Tore: keine Tore-Tipps, lieber Unter 4.5 / Unter 3.5 / doppelte Chance
+        return prof, {("OU4.5", "U"), ("OU3.5", "U"), ("OU2.5", "U"), ("H1_OU1.5", "U"),
+                      ("DC", "1X" if fav_home else "X2")}, set(_GOAL_OVERS)
     if prof == "favorit":  # ein Team trifft viel, das andere kaum: Favorit über 1.5, kein "beide treffen"
         fav, dog = ("HOME", "AWAY") if fav_home else ("AWAY", "HOME")
         return prof, {(f"{fav}1.5", "O"), ("1X2", "H" if fav_home else "A")}, \
@@ -550,6 +550,13 @@ def profile_rules(lam: float, mu: float) -> tuple[str, set, set]:
         return prof, {("OU2.5", "O"), ("BTTS", "Y"), ("OU1.5", "O")}, \
             {("OU2.5", "U"), ("OU3.5", "U"), ("H1_OU1.5", "U")}
     return prof, set(), set()
+
+
+def _rules(f: MatchForecast) -> tuple[str, set, set]:
+    prof, prefer, block = profile_rules(*f.implied_rates) if f.implied_rates else ("normal", set(), set())
+    if prof != "zaeh":  # Unter 4.5 nur in zähen Spielen (im Backtest 83 % erwartet → 83 % getroffen)
+        block = block | {("OU4.5", "U")}
+    return prof, prefer, block
 
 
 def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob: float,
@@ -562,7 +569,7 @@ def best_tip_per_match(forecasts: list[MatchForecast], min_prob: float, max_prob
 
     out = []
     for f in forecasts:
-        prof, prefer, block = profile_rules(*f.implied_rates) if f.implied_rates else ("normal", set(), set())
+        prof, prefer, block = _rules(f)
         cands = [(p + (GOAL_BONUS if _is_goal_market(m) else 0.0) + (PROFILE_BONUS if (m, sel) in prefer else 0.0),
                   p, m, sel)
                  for m, sels in (f.implied or {}).items() if m in markets for sel, p in sels.items()

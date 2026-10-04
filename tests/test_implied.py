@@ -216,3 +216,18 @@ def test_match_type_decides_the_tip():
     for leg in builder_legs([greece_germany], 0.3, 0.6):
         assert not any((p[0] == "OU" and p[1] == "O" and p[2] >= 2.5) or (p[0] in ("AWAY", "HOME") and p[1] == "O")
                        or (p[0] == "BTTS" and p[1] == "Y") for p in leg["parts"])
+
+
+def test_under_45_only_in_tough_matches():
+    from fussball.models.builder import halftime_markets
+    from fussball.service import best_tip_per_match
+
+    def fc(i, lam, mu):
+        return MatchForecast(i, "soccer_epl", "EPL", datetime(2026, 10, 4, 18, 45), f"H{i}", f"A{i}", lam, mu, {}, {},
+                             {}, None, None, 0.0, {}, implied={**implied_markets(lam, mu), **halftime_markets(lam, mu)},
+                             implied_rates=(lam, mu))
+
+    tips = {t["match_id"]: t for t in best_tip_per_match([fc(1, 1.0, 1.6), fc(2, 1.7, 1.3)], 0.75, 0.90)}
+    assert (tips[1]["market"], tips[1]["selection"]) == ("OU4.5", "U") and tips[1]["label"] == "Unter 4.5 Tore"
+    labels2 = [tips[2]["label"]] + [a["label"] for a in tips[2]["alternatives"]]
+    assert "Unter 4.5 Tore" not in labels2  # nicht im normalen Spiel

@@ -552,10 +552,19 @@ def profile_rules(lam: float, mu: float) -> tuple[str, set, set]:
     return prof, set(), set()
 
 
+NATIONAL_AWAY_TEAM_MIN = 0.75
+
+
 def _rules(f: MatchForecast) -> tuple[str, set, set]:
     prof, prefer, block = profile_rules(*f.implied_rates) if f.implied_rates else ("normal", set(), set())
     if prof != "zaeh":  # Unter 4.5 nur in zähen Spielen (im Backtest 83 % erwartet → 83 % getroffen)
         block = block | {("OU4.5", "U")}
+    if category(f.comp, getattr(f, "comp_name", None)) == "national":
+        # Länderspiele: Aussenseiter mauern oft (Griechenland – Deutschland 0:0 trotz 15:3 Schüssen).
+        # Teamtore ohne Bonus; auswärts nur, wenn sehr klar.
+        prefer = {t for t in prefer if t[0] not in ("HOME1.5", "AWAY1.5")}
+        if (f.implied or {}).get("AWAY1.5", {}).get("O", 0.0) < NATIONAL_AWAY_TEAM_MIN:
+            block = block | {("AWAY1.5", "O")}
     return prof, prefer, block
 
 
@@ -721,7 +730,7 @@ def builder_legs(forecasts: list[MatchForecast], min_prob: float, max_prob: floa
         if f.match_id in (skip or set()) or not f.implied_rates:
             continue
         lam, mu = f.implied_rates
-        prof, _prefer, block = profile_rules(lam, mu)
+        prof, _prefer, block = _rules(f)
         code = lambda p: (f"{p.market}{p.line:g}" if p.market in ("OU", "HOME", "AWAY") else p.market, p.selection)  # noqa: E731
         found = [b for b in best_builders(lam, mu, min_prob, max_prob, top=6)
                  if not any(code(p) in block for p in b.parts)][:3]

@@ -208,8 +208,12 @@ def test_match_type_decides_the_tip():
     # zähes Spiel: keine Tore-Tipps
     assert (tips[1]["market"], tips[1]["selection"]) not in {("AWAY1.5", "O"), ("OU3.5", "O"), ("OU2.5", "O")}
     assert all((a["market"], a["selection"]) != ("AWAY1.5", "O") for a in tips[1]["alternatives"])
-    # Favorit gegen Schwächeren: Favorit über 1.5
-    assert (tips[2]["market"], tips[2]["selection"]) == ("HOME1.5", "O")
+    # Länderspiel, Favorit gegen Schwächeren: kein Bonus mehr für Teamtore, aber erlaubt
+    assert tips[2]["profile"] == "favorit" and (tips[2]["market"], tips[2]["selection"]) != ("BTTS", "Y")
+    # Länderspiel, Favorit auswärts: "Team über 1.5" nur ab 75 % (Griechenland – Deutschland 0:0)
+    away = {t["match_id"]: t for t in best_tip_per_match([fc(4, 0.7, 2.2), fc(5, 0.5, 2.9)], 0.45, 0.90)}
+    assert all((a["market"], a["selection"]) != ("AWAY1.5", "O") for a in [away[4], *away[4]["alternatives"]])
+    assert any((a["market"], a["selection"]) == ("AWAY1.5", "O") for a in [away[5], *away[5]["alternatives"]])
     # offenes Spiel: kein Unter-Tipp
     assert tips[3]["selection"] != "U" and tips[3]["profile"] == "offen"
     # BetBuilder im zähen Spiel ohne Tore-Teile
@@ -231,3 +235,15 @@ def test_under_45_only_in_tough_matches():
     assert (tips[1]["market"], tips[1]["selection"]) == ("OU4.5", "U") and tips[1]["label"] == "Unter 4.5 Tore"
     labels2 = [tips[2]["label"]] + [a["label"] for a in tips[2]["alternatives"]]
     assert "Unter 4.5 Tore" not in labels2  # nicht im normalen Spiel
+
+
+def test_league_favourite_still_prefers_team_over_15():
+    from fussball.models.builder import halftime_markets
+    from fussball.service import best_tip_per_match
+
+    lam, mu = 3.26, 0.59
+    f = MatchForecast(1, "soccer_epl", "EPL", datetime(2026, 10, 4, 18, 45), "H", "A", lam, mu, {}, {}, {}, None,
+                      None, 0.0, {}, implied={**implied_markets(lam, mu), **halftime_markets(lam, mu)},
+                      implied_rates=(lam, mu))
+    tip = best_tip_per_match([f], 0.55, 0.90)[0]
+    assert (tip["market"], tip["selection"]) == ("HOME1.5", "O")

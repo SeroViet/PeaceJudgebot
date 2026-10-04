@@ -892,7 +892,7 @@ def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: 
     from fussball.agents import runner
     from fussball.app.state import local
 
-    limit = limit or int(os.getenv("AGENT_TOP_MAX", "10"))
+    limit = limit or int(os.getenv("AGENT_TOP_MAX", "14"))
     now = utcnow()
     min_prob = float(os.getenv("TOP_MIN_PROB", "0.80"))  # nur Tipps, die in /top5 überhaupt in Frage kommen
     todo = sorted((t for t in plan.top if t["prob"] >= min_prob
@@ -900,21 +900,33 @@ def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: 
                   key=lambda t: -t["prob"])[:limit]
     if not todo:
         return []
-    res = runner.check_tips(engine, todo, client=client, local_time=local)
-    for t, r in zip(todo, res):
-        if r.get("assessment"):
-            t["agent"], t["reason"] = r["assessment"], r.get("reason", "")
-    # Gegenprüfung: ein zweiter Agent sucht gezielt, warum ein bestätigter Tipp verliert.
-    # Nur was beide bestätigen, bleibt 🟢; ohne Gegenprüfung (Limit) gilt der Tipp als ungeprüft.
-    if os.getenv("AGENT_CHALLENGE", "1") == "1":
-        ok = [t for t in todo if t.get("agent") == "bestätigt"][:int(os.getenv("TOP_TIPS", "6"))]
-        for t, r in zip(ok, runner.challenge_tips(engine, ok, client=client, local_time=local)):
-            if r.get("assessment") in ("vorsicht", "streichen"):
-                t["agent"], t["reason"] = r["assessment"], r.get("reason", "")
-            elif r.get("assessment") is None:
-                t["agent"], t["reason"] = "ungeprüft", r.get("reason", "")
-            else:
-                t["challenged"] = True
+    # Schritt für Schritt, die sichersten zuerst: Scout prüft, Gegenprüfer greift an. Sobald `want` Tipps
+    # beide Prüfungen bestanden haben, ist Schluss – so wird kein Geld für unnötige Recherchen ausgegeben.
+    want = int(os.getenv("TOP_TIPS", "6"))
+    challenge = os.getenv("AGENT_CHALLENGE", "1") == "1"
+    res, passed = [], 0
+    for t in todo:
+        if passed >= want:
+            break
+        r = runner.check_tips(engine, [t], client=client, local_time=local)[0]
+        res.append(r)
+        if not r.get("assessment"):
+            if "Tageslimit" in r.get("reason", ""):
+                break
+            continue
+        t["agent"], t["reason"] = r["assessment"], r.get("reason", "")
+        if t["agent"] != "bestätigt":
+            continue
+        if challenge:
+            c = runner.challenge_tips(engine, [t], client=client, local_time=local)[0]
+            if c.get("assessment") is None:
+                t["agent"], t["reason"] = "ungeprüft", c.get("reason", "")
+                break  # Limit erreicht
+            if c["assessment"] != "bestätigt":
+                t["agent"], t["reason"] = c["assessment"], c.get("reason", "")
+                continue
+            t["challenged"] = True
+        passed += 1
     return res
 
 

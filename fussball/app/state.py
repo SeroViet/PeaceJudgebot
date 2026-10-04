@@ -97,7 +97,9 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
         # Agenten kosten Geld: nur auf Anforderung (täglicher Lauf), nie bei jedem Neustart/Refresh.
         # Ohne Agentenlauf werden die letzten Bewertungen (Cache) übernommen, ohne neue Kosten.
         try:
-            info["agent"] = service.apply_agents(engine, plan, cached_only=not agents)
+            # Tageskombi nur mit "D" in AGENT_COMBOS neu prüfen – sonst geht das Budget in die 6 sicheren Tipps
+            day_scope = agents and "D" in os.getenv("AGENT_COMBOS", "T").upper()
+            info["agent"] = service.apply_agents(engine, plan, cached_only=not day_scope)
         except Exception:  # noqa: BLE001 – ohne Agenten weiterarbeiten
             log.exception("Agenten fehlgeschlagen")
         for kind, attr, letter in (("boost", "boost_combos", "B"), ("torfest", "torfest_combos", "F"),

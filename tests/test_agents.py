@@ -106,19 +106,20 @@ def test_no_client_no_agents(engine, monkeypatch):
 def test_due_lineup_checks_window():
     from fussball.app.jobs import due_lineup_checks
 
-    plan = {"day_combos": [{"legs": [{"match_id": 5, "kickoff": "2026-10-10T13:30:00"}]}]}
+    plan = {"top": [{"match_id": 5, "kickoff": "2026-10-10T13:30:00", "agent": "bestätigt"}]}
     assert due_lineup_checks(plan, datetime(2026, 10, 10, 12, 15), 75, set())
     assert not due_lineup_checks(plan, datetime(2026, 10, 10, 10, 0), 75, set())
 
 
-def test_due_lineup_checks_cover_all_combos_and_top():
+def test_due_lineup_checks_only_confirmed_safe_tips():
     from fussball.app.jobs import due_lineup_checks, lineup_alert
 
-    leg = lambda mid: {"match_id": mid, "kickoff": "2026-10-10T13:30:00", "match": f"A{mid} – B", "label": "Über 1.5 Tore"}  # noqa: E731
-    plan = {"day_combos": [{"legs": [leg(1)]}], "boost_combos": [{"legs": [leg(2), leg(1)]}],
-            "krass_combos": [{"legs": [leg(3)]}], "top": [leg(4), leg(2)]}
-    due = due_lineup_checks(plan, datetime(2026, 10, 10, 12, 15), 75, {"L3"})
-    assert sorted(x["match_id"] for x in due) == [1, 2, 4]
+    leg = lambda mid, **kw: {"match_id": mid, "kickoff": "2026-10-10T13:30:00", "match": f"A{mid} – B",  # noqa: E731
+                             "label": "Über 1.5 Tore", **kw}
+    plan = {"day_combos": [{"legs": [leg(1)]}], "krass_combos": [{"legs": [leg(3)]}],
+            "top": [leg(4, agent="bestätigt"), leg(2, agent="vorsicht"), leg(5), leg(6, agent="bestätigt")]}
+    due = due_lineup_checks(plan, datetime(2026, 10, 10, 12, 15), 75, {"L6"})
+    assert [x["match_id"] for x in due] == [4]  # kein Geld für Spiele, die du gar nicht bekommst
     assert lineup_alert(leg(1), {"assessment": "bestätigt"}) is None
     text = lineup_alert(leg(1), {"assessment": "vorsicht", "reason": "Stammtorwart fehlt"})
     assert "🔴" in text and "Stammtorwart fehlt" in text and "<code>Über 1.5 Tore</code>" in text
@@ -325,3 +326,24 @@ def test_challenge_agent_can_overrule_scout(engine, monkeypatch):
     plan.top = [{**plan.top[1], "agent": None, "challenged": False}]
     service.apply_agents_top(engine, plan, client=client)
     assert plan.top[0]["agent"] == "ungeprüft"
+
+
+def test_top_check_stops_when_six_passed(engine, monkeypatch):
+    from datetime import timedelta
+
+    from fussball import service
+    from fussball.data.schema import utcnow
+
+    soon = (utcnow() + timedelta(hours=3)).isoformat()
+    plan = type("P", (), {})()
+    plan.top = [{"match_id": i, "match": f"H{i} – A{i}", "kickoff": soon, "comp": "X", "label": "Über 1.5 Tore",
+                 "prob": 0.89 - i / 100} for i in range(9)]
+    scouted, attacked = [], []
+    monkeypatch.setattr(runner, "check_tips", lambda e, items, **kw: scouted.extend(items) or
+                        [{"assessment": "vorsicht" if items[0]["match_id"] == 1 else "bestätigt", "reason": "x"}])
+    monkeypatch.setattr(runner, "challenge_tips", lambda e, items, **kw: attacked.extend(items) or
+                        [{"assessment": "streichen" if items[0]["match_id"] == 2 else "bestätigt", "reason": "y"}])
+    service.apply_agents_top(engine, plan)
+    assert [t["match_id"] for t in scouted] == list(range(8))  # 1 und 2 fallen raus → bis Spiel 7 geprüft
+    assert 1 not in [t["match_id"] for t in attacked]  # gewarnter Tipp wird nicht noch gegengeprüft
+    assert sum(t.get("agent") == "bestätigt" for t in plan.top) == 6 and "agent" not in plan.top[8]

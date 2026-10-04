@@ -233,19 +233,20 @@ def due_reminders(plan: dict, now: datetime, minutes: int, already: set[str]) ->
     return out
 
 
-LINEUP_SOURCES = ("day_combos",)  # + Top-Tipps; riskante Kombis nicht (Budget für die sicheren Tipps)
+LINEUP_SOURCES: tuple[str, ...] = ()  # Kombis nur mit LINEUP_COMBOS=1 – Budget für die sicheren Tipps
 
 
 def due_lineup_checks(plan: dict, now: datetime, minutes: int, already: set[str]) -> list[dict]:
     """Alle Spiele mit einem Bot-Tipp (Kombis + Top-Tipps), deren Anpfiff in ~`minutes` Minuten ist:
     offizielle Aufstellung prüfen. Ein Spiel nur einmal (Tipp der sichersten Kombi zuerst)."""
     legs: dict[int, dict] = {}
-    for src in LINEUP_SOURCES:
+    for src in LINEUP_SOURCES + (("day_combos",) if os.getenv("LINEUP_COMBOS", "0") == "1" else ()):
         for c in plan.get(src, []):
             for l in c["legs"]:
                 legs.setdefault(l["match_id"], l)
-    for t in plan.get("top") or []:
-        legs.setdefault(t["match_id"], t)
+    for t in plan.get("top") or []:  # nur die von beiden Agenten bestätigten sicheren Tipps
+        if t.get("agent") == "bestätigt":
+            legs.setdefault(t["match_id"], t)
     out = []
     for mid, leg in legs.items():
         kickoff = datetime.fromisoformat(leg["kickoff"])

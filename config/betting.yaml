@@ -40,6 +40,12 @@ risky_combo:
   min_prob: 0.35
   max_prob: 0.50
 
+# Boost-Kombi: Sporttip-KombiBoost gibt es nur für Tipps ab Quote 1.50 → 5 Tipps mit 55–62 %
+boost_combo:
+  size: 5
+  min_prob: 0.55
+  max_prob: 0.62
+
 # Krass-Kombi: 3 BetBuilder mit je Quote ca. 2–3 → Gesamtquote ca. 8–25
 krass_combo:
   builders: 3

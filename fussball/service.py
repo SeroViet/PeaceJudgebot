@@ -754,9 +754,21 @@ def _covers(new: list[dict], old: list[dict], day: str) -> bool:
     return cats(new) >= cats(old)
 
 
+# Boost-Kombi für den Sporttip-KombiBoost: Bonus gibt es nur für Tipps ab Quote 1.50. Sporttip zahlt ca. 7 %
+# unter fair → Wahrscheinlichkeit höchstens ~62 %. Wir nehmen die sichersten Tipps knapp darunter (55–62 %).
+BOOST_MARKETS = ("1X2", "DC", "OU1.5", "OU2.5", "OU3.5", "BTTS", "HOME1.5", "AWAY1.5", "H1_DC", "H1_OU0.5")
+SPORTTIP_FACTOR = 0.93  # Sporttip-Quote ≈ faire Quote × 0.93 (aus Screenshots gemessen), bis der Bot es gelernt hat
+
+
 def build_extra_combos(plan: "DailyPlan", kind: str, skip: set[int] | None = None) -> list[dict]:
-    """Risiko- (kind='risky', 2 BetBuilder) oder Krass-Kombi (kind='krass', 3 BetBuilder)."""
+    """Risiko- (kind='risky', 2 BetBuilder), Krass- (kind='krass', 3 BetBuilder) oder Boost-Kombi
+    (kind='boost', Tipps ab Sporttip-Quote 1.50 für den KombiBoost)."""
     pool = plan.all_forecasts or plan.forecasts
+    if kind == "boost":
+        bc = plan.config.get("boost_combo", {})
+        return [{**c, "boost": True, "risky": False} for c in risky_combos(
+            pool, plan.day_combos, bc.get("size", 5), bc.get("min_prob", 0.55), bc.get("max_prob", 0.62),
+            skip=skip, markets=BOOST_MARKETS)]
     if kind == "risky":
         rc = plan.config.get("risky_combo", {})
         return [{**c, "risky": True} for c in builder_combos(
@@ -775,7 +787,7 @@ def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h
     from fussball.agents import runner
     from fussball.app.state import local
 
-    attr = "risky_combos" if kind == "risky" else "krass_combos"
+    attr = f"{kind}_combos"
     now = utcnow()
     soon = [c for c in getattr(plan, attr)
             if now < datetime.fromisoformat(c["legs"][0]["kickoff"]) <= now + timedelta(hours=horizon_h)]
@@ -956,6 +968,7 @@ class DailyPlan:
     all_forecasts: list = field(default_factory=list)
     risky_combos: list[dict] = field(default_factory=list)
     krass_combos: list[dict] = field(default_factory=list)
+    boost_combos: list[dict] = field(default_factory=list)
     top: list[dict] = field(default_factory=list)  # bester Tipp pro Spiel (für /top5)
 
 

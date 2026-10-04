@@ -58,6 +58,7 @@ def serialize_plan(plan: service.DailyPlan) -> dict:
         "day_combos": [{**c, "id": f"T{i}"} for i, c in enumerate(plan.day_combos, start=1)],
         "risky_combos": [{**c, "id": f"R{i}"} for i, c in enumerate(plan.risky_combos, start=1)],
         "krass_combos": [{**c, "id": f"X{i}"} for i, c in enumerate(plan.krass_combos, start=1)],
+        "boost_combos": [{**c, "id": f"B{i}"} for i, c in enumerate(plan.boost_combos, start=1)],
         "top": plan.top,
         "forecasts": [f.to_dict() for f in plan.forecasts],
         "singles": singles,
@@ -98,23 +99,24 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
             info["agent"] = service.apply_agents(engine, plan, cached_only=not agents)
         except Exception:  # noqa: BLE001 – ohne Agenten weiterarbeiten
             log.exception("Agenten fehlgeschlagen")
-        for kind, attr in (("risky", "risky_combos"), ("krass", "krass_combos")):
+        for kind, attr, letter in (("boost", "boost_combos", "B"), ("risky", "risky_combos", "R"),
+                                   ("krass", "krass_combos", "X")):
             setattr(plan, attr, service.build_extra_combos(plan, kind))
             service.annotate_value(engine, getattr(plan, attr))
-            # AGENT_COMBOS: welche Zusatz-Kombis der Scout prüft (R = Risiko, X = Krass); die Tageskombi immer
-            scope = os.getenv("AGENT_COMBOS", "R,X").upper()
-            checked = agents and ("R" if kind == "risky" else "X") in scope
+            # AGENT_COMBOS: welche Zusatz-Kombis der Scout prüft (B = Boost, R = Risiko, X = Krass); Tageskombi immer
+            scope = os.getenv("AGENT_COMBOS", "B,R,X").upper()
+            checked = agents and letter in scope
             try:
                 info["agent"] += service.apply_agents_risky(engine, plan, cached_only=not checked, kind=kind)
             except Exception:  # noqa: BLE001
                 log.exception("Agenten (%s) fehlgeschlagen", kind)
         books = plan.config.get("bookmakers") or None
-        for combos in (plan.day_combos, plan.risky_combos, plan.krass_combos):
+        for combos in (plan.day_combos, plan.boost_combos, plan.risky_combos, plan.krass_combos):
             service.attach_book_odds(engine, combos, books)
         from fussball.agents import slip
 
         table = slip.ratios(engine)
-        for c in plan.day_combos + plan.risky_combos + plan.krass_combos:
+        for c in plan.day_combos + plan.boost_combos + plan.risky_combos + plan.krass_combos:
             for leg in c["legs"]:
                 leg["sporttip_est"] = slip.estimate(table, leg["market"], 1 / leg["prob"])
         data = serialize_plan(plan)

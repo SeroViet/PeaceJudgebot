@@ -205,6 +205,7 @@ async def _daily_loop(engine=None):
             await asyncio.sleep(30)
         plan = state.load_plan()
         await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
+        await telegram_bot.notify(_bot, telegram_bot.format_boost(plan))
         _track_top(engine, plan)
         if os.getenv("DAILY_FULL", "0") == "1":  # ausführliche Kombis nur auf Wunsch, sonst /tageskombi
             await telegram_bot.notify(_bot, "☀️ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))

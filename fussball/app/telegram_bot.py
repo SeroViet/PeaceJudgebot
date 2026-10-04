@@ -73,7 +73,7 @@ def top_tips(plan: dict, n: int = 5, day: str | None = None) -> dict[str, list[d
     now = datetime.now(state.TZ)
     day = day or now.date().isoformat()
     reports = {l["match_id"]: (l.get("agent") or {})
-               for k in ("day_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) for l in c["legs"]}
+               for k in ("day_combos", "boost_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) for l in c["legs"]}
     agent = {mid: r.get("assessment") for mid, r in reports.items()}
     best: dict[int, dict] = {}
     for t in plan.get("top") or plan.get("safe", []):
@@ -141,8 +141,8 @@ def _find_legs(plan: dict, tip_id: str) -> list[dict] | None:
     if tid.startswith("K"):
         c = next((c for c in plan["combos"] if c["id"] == tid), None)
         return c["legs"] if c else None
-    if tid.startswith(("T", "R", "X")):
-        c = next((c for c in plan.get("day_combos", []) + plan.get("risky_combos", []) + plan.get("krass_combos", []) if c["id"] == tid), None)
+    if tid.startswith(("T", "R", "X", "B")):
+        c = next((c for c in plan.get("day_combos", []) + plan.get("boost_combos", []) + plan.get("risky_combos", []) + plan.get("krass_combos", []) if c["id"] == tid), None)
         if not c:
             return None
         out = []
@@ -197,7 +197,7 @@ def _odds_time(legs: list[dict]) -> str:
 def check_sporttip(plan: dict, combo_id: str, quotes: list[float]) -> str:
     """Sporttip-Quoten mit den fairen Quoten der Tageskombi vergleichen.
     Eine Zahl = Gesamtquote der Kombi; sonst eine Quote pro Spiel (in der Reihenfolge der Nachricht)."""
-    c = next((c for c in plan.get("day_combos", []) + plan.get("risky_combos", []) + plan.get("krass_combos", [])
+    c = next((c for c in plan.get("day_combos", []) + plan.get("boost_combos", []) + plan.get("risky_combos", []) + plan.get("krass_combos", [])
               if c["id"].upper() == combo_id.upper()), None)
     if c is None:
         return f"Kombi {combo_id} nicht gefunden. Die aktuelle Nummer steht in /tageskombi (z. B. T1)."
@@ -283,6 +283,42 @@ def format_slip(rows: list[dict], checks: list[dict], book: str = "Sporttip") ->
     return "\n".join(lines)
 
 
+BOOST_BT = ("Für den Sporttip-KombiBoost: jeder Tipp ab Quote 1.50 → Sporttip legt Bonus drauf. "
+            "Geht etwa an 1 von 10–15 Tagen auf. Nur kleiner Einsatz.")
+
+
+def leg_sporttip(l: dict) -> float:
+    """Ungefähre Sporttip-Quote eines Tipps: gelernt aus Screenshots, sonst faire Quote × 0.93."""
+    from fussball.service import SPORTTIP_FACTOR
+
+    return l.get("sporttip_est") or round(SPORTTIP_FACTOR / l["prob"], 2)
+
+
+def sporttip_odds(c: dict) -> float:
+    out = 1.0
+    for l in c["legs"]:
+        out *= leg_sporttip(l)
+    return out
+
+
+def format_boost(plan: dict) -> str:
+    """Kurz: die Boost-Kombis von heute (Tipps ab Quote 1.50 für den Sporttip-KombiBoost)."""
+    from datetime import datetime
+
+    today = datetime.now(state.TZ).date().isoformat()
+    combos = [c for c in plan.get("boost_combos", []) if c["day"] == today]
+    if not combos:
+        return ""
+    out = ["🚀 <b>Boost-Kombi heute</b> (jeder Tipp ab Quote 1.50 → KombiBoost)"]
+    for c in combos:
+        out.append(f"\n<b>{SHORT_CAT.get(c.get('cat'), '')}</b>")
+        for l in c["legs"]:
+            out.append(f"<b>{state.local(l['kickoff']).strftime('%H:%M')} {l['match']}</b>\n"
+                       f"➡️ {tip(l['label'])} · {l['prob']:.0%} · Quote ca. {leg_sporttip(l):.2f}")
+        out.append(f"<i>Gesamtquote ca. {sporttip_odds(c):.1f} + Boost · Chance {c['prob']:.0%}</i>")
+    return "\n".join(out)
+
+
 def sporttip_estimate(c: dict) -> float | None:
     """Geschätzte Sporttip-Gesamtquote einer Kombi (aus gelernten Screenshots), falls für alle Legs bekannt."""
     if not c["legs"] or not all(l.get("sporttip_est") for l in c["legs"]):
@@ -301,7 +337,7 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
 
     days = sorted({c["day"] for c in combos})[:max_days]
     order = list(CATEGORIES)
-    kind = lambda c: 2 if c.get("krass") else 1 if c.get("risky") else 0  # noqa: E731
+    kind = lambda c: 3 if c.get("krass") else 2 if c.get("risky") else 1 if c.get("boost") else 0  # noqa: E731
     out = []
     for day in days:
         day_combos = sorted([c for c in combos if c["day"] == day],
@@ -319,6 +355,7 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
                               f" <i>({l.get('comp_name') or l.get('comp', '')})</i>\n"
                               f"     {'🧩' if l.get('market') == 'BB' else '➡️'} {tip(l['label'])} <b>({l['prob']:.0%})</b>"
                               f"{icon.get((l.get('agent') or {}).get('assessment'), '')}"
+                              + (f" · Quote ca. {leg_sporttip(l):.2f}" if c.get("boost") else "")
                               + (f"\n     <i>🔄 vom Scout gewählt statt „{l['switched_from']}“</i>"
                                  if l.get("switched_from") else "")
                               + (f"\n     <i>🔴 {html.escape(l['agent']['reason'])}</i>"
@@ -326,7 +363,11 @@ def format_day_combos(plan: dict, max_days: int = 2) -> str:
                               for i, l in enumerate(c["legs"], 1))
             wide = ("\n<i>Heute gibt es nicht genug Spiele im Bereich 75–88 %, darum etwas "
                     "breiter gewählt.</i>" if c.get("widened") else "")
-            if c.get("krass"):
+            if c.get("boost"):
+                odds = sporttip_odds(c)
+                head = f"🚀 <b>{c['id']} · Boost-Kombi {d}</b> ({c['size']} Tipps, Sporttip ca. {odds:.1f} + KombiBoost)"
+                bt, pct = BOOST_BT, STAKE_PCT["risky"]
+            elif c.get("krass"):
                 head = f"🔥 <b>{c['id']} · Krass-Kombi {d}</b> ({c['size']} BetBuilder)"
                 bt, pct = KRASS_BT, STAKE_PCT["krass"]
             elif c.get("risky"):
@@ -348,13 +389,13 @@ def format_today(plan: dict) -> str:
     from datetime import datetime
 
     today = datetime.now(state.TZ).date().isoformat()
-    every = [c for k in ("day_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) if c["day"] == today]
+    every = [c for k in ("day_combos", "boost_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) if c["day"] == today]
     dropped = 0
     if os.getenv("VALUE_ONLY") == "1":  # Nur-Value-Modus: Kombis weglassen, die bei Sporttip vermutlich Verlust sind
         keep = [c for c in every if sporttip_estimate(c) is None or sporttip_estimate(c) >= c["fair_odds"]]
         dropped, every = len(every) - len(keep), keep
         plan = {**plan, **{k: [c for c in plan.get(k, []) if c in keep or c["day"] != today]
-                           for k in ("day_combos", "risky_combos", "krass_combos")}}
+                           for k in ("day_combos", "boost_combos", "risky_combos", "krass_combos")}}
     note = (f"\n\n🧮 {dropped} Kombi(s) weggelassen – Sporttip zahlt dort vermutlich weniger als fair."
             if dropped else "")
     if any(c["day"] == today for c in plan.get("day_combos", [])):
@@ -452,6 +493,7 @@ def format_stats(engine) -> str:
 COMMANDS = [
     ("top5", "Die 5 besten Tipps von heute – kurz"),
     ("tageskombi", "3er- und 5er-Kombi, alle Spiele am selben Tag"),
+    ("boost", "Boost-Kombi: Tipps ab Quote 1.50 + Sporttip-KombiBoost"),
     ("risiko", "Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8"),
     ("krass", "Krass-Kombi: 3 BetBuilder, Quote ca. 8–25"),
     ("ergebnisse", "Deine Tipps: 🟢 gewonnen / 🔴 verloren"),
@@ -500,6 +542,7 @@ def build(engine) -> Application | None:
             return
         await reply(update, "👋 PeaceJudge ist bereit.\n/top5 – die 5 besten Tipps von heute\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/tageskombi – 3er- und 5er-Kombi, alle Spiele am selben Tag\n"
+                            "/boost – Boost-Kombi: Tipps ab 1.50 + KombiBoost\n"
                             "/risiko – Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8\n"
                             "/krass – Krass-Kombi: 3 BetBuilder, Quote ca. 8–25\n"
                             "📸 Screenshot vom Wettschein schicken – die Agenten prüfen jeden Tipp: 🟢 geht auf / 🔴 nicht\n"
@@ -577,6 +620,12 @@ def build(engine) -> Application | None:
         combos = plan.get("risky_combos", [])
         await reply(update, format_day_combos({**plan, "day_combos": combos}, max_days=2) if combos
                     else "Keine Risiko-Kombi möglich (zu wenige Spiele mit 60–72 % an einem Tag).")
+
+    async def cmd_boost(update: Update, _ctx):
+        plan = state.load_plan()
+        combos = plan.get("boost_combos", [])
+        await reply(update, format_day_combos({**plan, "day_combos": combos}, max_days=2) if combos
+                    else "Keine Boost-Kombi möglich (zu wenige Spiele mit Tipps ab Quote 1.50).")
 
     async def cmd_krass(update: Update, _ctx):
         plan = state.load_plan()
@@ -667,7 +716,7 @@ def build(engine) -> Application | None:
     app.add_handler(CommandHandler("start", cmd_start))
     for name, fn in (("heute", cmd_today), ("top5", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update),
-                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("kosten", cmd_costs), ("ergebnisse", cmd_results)):
+                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("boost", cmd_boost), ("kosten", cmd_costs), ("ergebnisse", cmd_results)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     app.add_handler(MessageHandler((filters.PHOTO | filters.Document.IMAGE) & only_owner, on_photo))
     return app

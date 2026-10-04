@@ -104,3 +104,29 @@ def test_top5_short_and_by_category():
     assert "🌍 Länderspiele" in text and "🌎 Südamerika" in text
     assert text.count("➡️") == 7  # 5 Länderspiele + 2 Frauen, ein Tipp pro Spiel
     assert "Unter 4.5" not in text and len(text) < 1500
+
+
+def test_boost_combo_tips_from_150(engine, monkeypatch):
+    from datetime import datetime, timedelta
+
+    from fussball import service
+    from fussball.app import state
+    from fussball.service import MatchForecast
+
+    start = (datetime.now(state.TZ) + timedelta(minutes=20))
+    if (start + timedelta(hours=6)).date() != start.date():
+        return  # kurz vor Mitternacht nicht prüfbar
+    kick = start.astimezone(__import__("zoneinfo").ZoneInfo("UTC")).replace(tzinfo=None)
+    fs = [MatchForecast(i, "soccer_usa_mls", "MLS", kick + timedelta(minutes=30 * i), f"H{i}", f"A{i}", 1.6, 1.3,
+                        {}, {}, {}, None, None, 0.0, {},
+                        implied={"OU2.5": {"O": 0.60, "U": 0.40}, "OU1.5": {"O": 0.85, "U": 0.15},
+                                 "BTTS": {"Y": 0.58, "N": 0.42}}) for i in range(6)]
+    monkeypatch.setattr(service, "market_forecasts", lambda engine, hours: fs)
+    plan = service.daily_plan(engine, days=3, forecasts=[])
+    boost = service.build_extra_combos(plan, "boost")
+    assert boost and boost[0]["boost"] and boost[0]["size"] == 5
+    assert all(0.55 <= l["prob"] <= 0.62 for l in boost[0]["legs"])
+    legs = boost[0]["legs"]
+    assert all(telegram_bot.leg_sporttip(l) >= 1.5 for l in legs)  # jeder Tipp ab 1.50 → KombiBoost
+    text = telegram_bot.format_boost({"boost_combos": [{**boost[0], "id": "B1"}]})
+    assert "Boost-Kombi heute" in text and "Quote ca." in text and "Gesamtquote ca." in text

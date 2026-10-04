@@ -248,3 +248,34 @@ def check_tips(engine: Engine, items: list[dict], client=None, local_time=None, 
             res["reason"] = f"Prüfung fehlgeschlagen ({type(exc).__name__})"
         out.append(res)
     return out
+
+
+def challenge_tips(engine: Engine, items: list[dict], client=None, local_time=None) -> list[dict]:
+    """Zweiter Agent: greift bestätigte Tipps gezielt an (letztes Duell, Torflaute, Mauern, Trainerwechsel).
+    Pro Tipp ca. 0.10–0.20 $, zählt zum Tageslimit. Ergebnis pro Tipp: {assessment, reason}
+    (assessment None = nicht geprüft, z. B. Limit erreicht)."""
+    client = client or scout.make_client()
+    out = []
+    for it in items:
+        res = {"assessment": None, "reason": ""}
+        if client is None or spent_today(engine) + 0.25 > daily_budget():
+            res["reason"] = "Tageslimit erreicht – Gegenprüfung fehlt"
+            out.append(res)
+            continue
+        facts = ""
+        cached = recent_report(engine, it["match_id"], 12.0) if it.get("match_id") is not None else None
+        if cached is not None:
+            intel = scout.MatchIntel.model_validate(cached.data)
+            facts = f"{intel.summary}\nTore: {intel.goal_trend}"
+        kickoff = local_time(it["kickoff"]) if local_time and it.get("kickoff") else it.get("kickoff", "")
+        try:
+            j, cost, _ = scout.challenge(client, it["match"], str(kickoff), it.get("comp_name") or it.get("comp", ""),
+                                         it["label"], facts,
+                                         max_searches=int(os.getenv("AGENT_CHALLENGE_SEARCHES", "4")))
+            add_other_cost(engine, cost)
+            res.update(assessment=j.tip_assessment, reason=j.tip_reason)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Gegenprüfung fehlgeschlagen für %s", it["match"])
+            res["reason"] = f"Gegenprüfung fehlgeschlagen ({type(exc).__name__})"
+        out.append(res)
+    return out

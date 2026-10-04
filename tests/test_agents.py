@@ -301,3 +301,27 @@ def test_apply_agents_top_checks_soonest_safest(monkeypatch):
     service.apply_agents_top(None, plan)
     assert [i["match_id"] for i in seen] == [1]  # nur Spiele der nächsten 24 h
     assert plan.top[0]["agent"] == "vorsicht" and "agent" not in plan.top[1]
+
+
+def test_challenge_agent_can_overrule_scout(engine, monkeypatch):
+    from datetime import timedelta
+
+    from fussball import service
+    from fussball.data.schema import utcnow
+
+    soon = (utcnow() + timedelta(hours=3)).isoformat()
+    plan = type("P", (), {})()
+    plan.top = [{"match_id": None, "match": m, "kickoff": soon, "comp": "UNL", "label": "Deutschland über 1.5 Tore",
+                 "prob": 0.85} for m in ("Griechenland – Deutschland", "Portugal – Norwegen")]
+    monkeypatch.setattr(runner, "check_tips", lambda e, items, **kw: [{"assessment": "bestätigt", "reason": ""}
+                                                                     for _ in items])
+    client = FakeClient({"Griechenland – Deutschland": "vorsicht"})
+    service.apply_agents_top(engine, plan, client=client)
+    assert plan.top[0]["agent"] == "vorsicht"  # Gegenprüfer hat das letzte Duell gefunden
+    assert plan.top[1]["agent"] == "bestätigt" and plan.top[1]["challenged"]
+    assert "angreifen" in client.last_research and runner.other_costs_today(engine)["n"] == 2
+    # Limit erreicht: ohne Gegenprüfung gilt der Tipp als ungeprüft (fällt aus den sicheren Tipps)
+    monkeypatch.setenv("AGENT_DAILY_BUDGET_USD", "0")
+    plan.top = [{**plan.top[1], "agent": None, "challenged": False}]
+    service.apply_agents_top(engine, plan, client=client)
+    assert plan.top[0]["agent"] == "ungeprüft"

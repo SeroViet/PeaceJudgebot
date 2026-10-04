@@ -229,6 +229,67 @@ def judge_tip(client, intel: MatchIntel, match: str, tip: str, model: str = MODE
     return resp.parsed_output, _cost(model, resp.usage, 0)
 
 
+CRITIC = """Du bist der kritische Gegenprüfer eines Wett-Analyse-Systems. Ein Scout hat einen Tipp schon
+als sicher bestätigt. Deine einzige Aufgabe: mit der Websuche gezielt nach Gründen suchen, warum der Tipp
+VERLIERT. Lass dir Zeit und suche gründlich, besonders nach dem, was ein Scout leicht übersieht:
+- Das LETZTE direkte Duell (auch wenn es erst Tage her ist): Ergebnis, wer hat getroffen, wer hat gemauert?
+- Die letzten 5 Spiele beider Teams: Tore erzielt/kassiert, Spiele zu null, Torflaute
+- Spielt der Gegner sehr defensiv (tiefe Abwehr, Fünferkette, Konter) oder auswärts auf Remis?
+- Neuer Trainer, Systemumstellung, Unruhe, Streit, Motivation (Spiel bedeutungslos? Rotation?)
+- Kurzfristige Ausfälle, Krankheit, Abreisen, Wetter, Platz, Reisestrapazen
+Bewerte danach:
+- "streichen": ein konkreter, gewichtiger Grund gegen den Tipp (z. B. Team hat gegen genau diesen
+  Gegner zuletzt nicht getroffen und braucht jetzt 2 Tore; Torjäger und Ersatz fehlen).
+- "vorsicht": ein konkreter Grund, der den Tipp spürbar schwächt (z. B. Torflaute: 2 der letzten 3 Spiele
+  höchstens 1 Tor bei einem Tore-Tipp; zuletzt torreiche Duelle bei einem Unter-Tipp).
+- "bestätigt": nur, wenn du trotz gezielter Suche keinen solchen Grund findest.
+Erfinde nichts. Fehlende Informationen allein sind kein Grund. Das Spiel findet zum genannten Termin statt.
+Antworte am Ende mit dem Urteil und 1 kurzen Satz auf Deutsch mit dem wichtigsten Fakt."""
+
+
+def challenge(client, match: str, kickoff_local: str, competition: str, tip: str, facts: str = "",
+              model: str = MODEL, max_searches: int = 4) -> tuple[TipJudgement, float, int]:
+    """Gegenprüfung (zweiter Agent): sucht gezielt Gründe, warum ein bestätigter Tipp verliert."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    today = datetime.now(ZoneInfo("Europe/Zurich")).strftime("%A, %d.%m.%Y %H:%M")
+    user = (f"Heute ist {today} (Schweizer Zeit).\nSpiel: {match}\nWettbewerb: {competition}\n"
+            f"Anstoss (Schweizer Zeit): {kickoff_local}\nTipp, den du angreifen sollst: {tip}\n"
+            + (f"Was der Scout schon gefunden hat:\n{facts}\n" if facts else "")
+            + "\nSuche jetzt gezielt nach Gründen, warum dieser Tipp verliert.")
+    messages = [{"role": "user", "content": user}]
+    tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches}]
+    cost, searches, text = 0.0, 0, None
+    for _ in range(4):
+        resp = client.beta.messages.create(
+            model=model, max_tokens=12000, system=CRITIC, tools=tools, messages=messages,
+            output_config={"effort": os.getenv("AGENT_EFFORT", "high")}, betas=[FALLBACK_BETA], fallbacks="default",
+        )
+        n = _count_searches(resp.content)
+        searches += n
+        cost += _cost(model, resp.usage, n)
+        if resp.stop_reason == "refusal":
+            raise RuntimeError("Gegenprüfung abgelehnt")
+        if resp.stop_reason == "pause_turn":
+            messages = [messages[0], {"role": "assistant", "content": resp.content}]
+            continue
+        text = "\n".join(b.text for b in resp.content if b.type == "text")
+        break
+    if text is None:
+        raise RuntimeError("Gegenprüfung nicht abgeschlossen")
+    resp = client.beta.messages.parse(
+        model=model, max_tokens=2000, output_format=TipJudgement, output_config={"effort": "low"},
+        betas=[FALLBACK_BETA], fallbacks="default",
+        messages=[{"role": "user", "content":
+                   f"Spiel: {match}\nTipp: {tip}\n\nGegenprüfung:\n{text}\n\nÜbernimm das Urteil der Gegenprüfung "
+                   "(bestätigt/vorsicht/streichen) und den wichtigsten Grund in 1 kurzem Satz auf Deutsch."}],
+    )
+    if resp.stop_reason == "refusal" or resp.parsed_output is None:
+        raise RuntimeError("Gegenprüfung nicht auswertbar")
+    return resp.parsed_output, cost + _cost(model, resp.usage, 0), searches
+
+
 class HalfTime(BaseModel):
     found: bool = Field(description="True nur, wenn der Halbzeitstand in einer Quelle eindeutig steht")
     ht_home: int | None = Field(description="Tore Heimteam zur Halbzeit")

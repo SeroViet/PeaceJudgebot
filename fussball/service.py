@@ -894,6 +894,17 @@ def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: 
     for t, r in zip(todo, res):
         if r.get("assessment"):
             t["agent"], t["reason"] = r["assessment"], r.get("reason", "")
+    # Gegenprüfung: ein zweiter Agent sucht gezielt, warum ein bestätigter Tipp verliert.
+    # Nur was beide bestätigen, bleibt 🟢; ohne Gegenprüfung (Limit) gilt der Tipp als ungeprüft.
+    if os.getenv("AGENT_CHALLENGE", "1") == "1":
+        ok = [t for t in todo if t.get("agent") == "bestätigt"][:int(os.getenv("TOP_TIPS", "6"))]
+        for t, r in zip(ok, runner.challenge_tips(engine, ok, client=client, local_time=local)):
+            if r.get("assessment") in ("vorsicht", "streichen"):
+                t["agent"], t["reason"] = r["assessment"], r.get("reason", "")
+            elif r.get("assessment") is None:
+                t["agent"], t["reason"] = "ungeprüft", r.get("reason", "")
+            else:
+                t["challenged"] = True
     return res
 
 

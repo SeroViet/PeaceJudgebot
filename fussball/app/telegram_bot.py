@@ -564,7 +564,7 @@ def build(engine) -> Application | None:
                 "Trage sie beim Server als TELEGRAM_OWNER_ID ein und starte den Dienst neu. "
                 "Danach antworte ich nur noch dir.")
             return
-        await reply(update, "👋 PeaceJudge ist bereit.\n/top5 – die 5 besten Tipps von heute\n/kombi – Kombis\n/spiel Team – Prognose\n"
+        await reply(update, "👋 PeaceJudge ist bereit.\n/top5 – die sichersten Tipps von heute\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/tageskombi – 3er- und 5er-Kombi, alle Spiele am selben Tag\n"
                             "/boost – Boost-Kombi: Tipps ab 1.50 + KombiBoost\n"
                             "/torfest – 1. Halbzeit Über 1.5 in den torreichsten Spielen\n"

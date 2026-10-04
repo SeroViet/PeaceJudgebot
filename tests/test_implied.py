@@ -214,4 +214,5 @@ def test_match_type_decides_the_tip():
     assert tips[3]["selection"] != "U" and tips[3]["profile"] == "offen"
     # BetBuilder im zähen Spiel ohne Tore-Teile
     for leg in builder_legs([greece_germany], 0.3, 0.6):
-        assert not any(p[0] in ("OU", "AWAY", "HOME") and p[1] == "O" and p[2] >= 1.5 for p in leg["parts"])
+        assert not any((p[0] == "OU" and p[1] == "O" and p[2] >= 2.5) or (p[0] in ("AWAY", "HOME") and p[1] == "O")
+                       or (p[0] == "BTTS" and p[1] == "Y") for p in leg["parts"])

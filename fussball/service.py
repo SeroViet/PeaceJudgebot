@@ -865,6 +865,37 @@ def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h
     return list(res.values())
 
 
+def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 24.0,
+                     limit: int | None = None) -> list[dict]:
+    """Scout prüft auch die Top-Tipps (/top5) der nächsten `horizon_h` Stunden – die sichersten zuerst.
+    Ist das Spiel schon recherchiert, wird nur der Tipp anhand der Fakten bewertet (1–2 Rappen).
+    Ergebnis landet im Tipp: agent = bestätigt/vorsicht/streichen, reason = kurzer Grund."""
+    from fussball.agents import runner
+    from fussball.app.state import local
+
+    limit = limit or int(os.getenv("AGENT_TOP_MAX", "15"))
+    now = utcnow()
+    todo = sorted((t for t in plan.top
+                   if now < datetime.fromisoformat(t["kickoff"]) <= now + timedelta(hours=horizon_h)),
+                  key=lambda t: -t["prob"])[:limit]
+    if not todo:
+        return []
+    res = runner.check_tips(engine, todo, client=client, local_time=local)
+    for t, r in zip(todo, res):
+        if r.get("assessment"):
+            t["agent"], t["reason"] = r["assessment"], r.get("reason", "")
+    return res
+
+
+def carry_top_agents(plan: "DailyPlan", old_top: list[dict]) -> None:
+    """Ohne neuen Agentenlauf: Urteile der letzten Prüfung für denselben Tipp übernehmen (kostenlos)."""
+    old = {(t["match_id"], t["label"]): t for t in old_top or [] if t.get("agent")}
+    for t in plan.top:
+        o = old.get((t["match_id"], t["label"]))
+        if o:
+            t["agent"], t["reason"] = o["agent"], o.get("reason", "")
+
+
 def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,
                  max_rounds: int = 3, cached_only: bool = False) -> list[dict]:
     """Scout-Agent prüft die Legs der nächsten Tageskombi (innerhalb `horizon_h`).

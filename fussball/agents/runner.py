@@ -17,8 +17,9 @@ log = logging.getLogger(__name__)
 
 
 def max_cost_per_match() -> float:
-    """Reserve vor jedem neu recherchierten Spiel (höchstens so viel kostet eines): Opus ~0.50 $, Sonnet ~0.30 $."""
-    default = "0.3" if "sonnet" in scout.MODEL else "0.5"
+    """Reserve vor jedem neu recherchierten Spiel (höchstens so viel kostet eines, gründliche Recherche mit
+    bis zu 6 Suchen): Opus ~0.60 $, Sonnet ~0.40 $."""
+    default = "0.4" if "sonnet" in scout.MODEL else "0.6"
     return float(os.getenv("AGENT_MAX_COST_PER_MATCH", default))
 
 
@@ -155,7 +156,7 @@ def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float
     client = client or (None if cached_only else scout.make_client())
     if client is None and not cached_only:
         return []
-    searches = max_searches or int(os.getenv("AGENT_MAX_SEARCHES", "4"))
+    searches = max_searches or int(os.getenv("AGENT_MAX_SEARCHES", "6"))
     out = []
     for leg in legs:
         cached = recent_report(engine, leg["match_id"], max_age_h)
@@ -215,7 +216,7 @@ def check_tips(engine: Engine, items: list[dict], client=None, local_time=None, 
                 try:
                     r = scout.scout_match(client, it["match"], it.get("kickoff") or "heute/demnächst",
                                           it.get("comp") or "", it["label"], "Keine Daten aus unserer Datenbank.",
-                                          max_searches=int(os.getenv("AGENT_MAX_SEARCHES", "4")))
+                                          max_searches=int(os.getenv("AGENT_MAX_SEARCHES", "6")))
                     add_other_cost(engine, r.cost_usd)
                     res.update(assessment=r.intel.tip_assessment, reason=r.intel.tip_reason)
                 except Exception as exc:  # noqa: BLE001
@@ -225,7 +226,10 @@ def check_tips(engine: Engine, items: list[dict], client=None, local_time=None, 
             continue
         try:
             cached = recent_report(engine, it["match_id"], max_age_h)
-            if cached is not None:
+            if cached is not None and cached.tip == it["label"]:
+                intel = scout.MatchIntel.model_validate(cached.data)  # genau dieser Tipp wurde schon geprüft
+                res.update(assessment=intel.tip_assessment, reason=intel.tip_reason)
+            elif cached is not None:
                 if spent_today(engine) + 0.05 > daily_budget():
                     res["reason"] = "Tageslimit erreicht – morgen wieder"
                 else:

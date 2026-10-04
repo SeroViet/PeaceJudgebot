@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
 from datetime import datetime, time, timedelta
@@ -231,9 +232,19 @@ def due_reminders(plan: dict, now: datetime, minutes: int, already: set[str]) ->
     return out
 
 
+LINEUP_SOURCES = ("day_combos", "boost_combos", "torfest_combos", "risky_combos", "krass_combos")
+
+
 def due_lineup_checks(plan: dict, now: datetime, minutes: int, already: set[str]) -> list[dict]:
-    """Legs der Tageskombis, deren Anpfiff in ~`minutes` Minuten ist (offizielle Aufstellung prüfen)."""
-    legs = {l["match_id"]: l for c in plan.get("day_combos", []) for l in c["legs"]}
+    """Alle Spiele mit einem Bot-Tipp (Kombis + Top-Tipps), deren Anpfiff in ~`minutes` Minuten ist:
+    offizielle Aufstellung prüfen. Ein Spiel nur einmal (Tipp der sichersten Kombi zuerst)."""
+    legs: dict[int, dict] = {}
+    for src in LINEUP_SOURCES:
+        for c in plan.get(src, []):
+            for l in c["legs"]:
+                legs.setdefault(l["match_id"], l)
+    for t in plan.get("top") or []:
+        legs.setdefault(t["match_id"], t)
     out = []
     for mid, leg in legs.items():
         kickoff = datetime.fromisoformat(leg["kickoff"])
@@ -241,6 +252,17 @@ def due_lineup_checks(plan: dict, now: datetime, minutes: int, already: set[str]
         if key not in already and now + timedelta(minutes=minutes - 10) < kickoff <= now + timedelta(minutes=minutes + 10):
             out.append(leg)
     return out
+
+
+def lineup_alert(leg: dict, res: dict) -> str | None:
+    """Kurze Warnung, wenn der Scout nach der Aufstellung „vorsicht“ oder „streichen“ meldet."""
+    if res.get("assessment") not in ("vorsicht", "streichen"):
+        return None
+    head = "❌ <b>Nicht setzen</b>" if res["assessment"] == "streichen" else "🔴 <b>Vorsicht</b>"
+    k = state.local(leg["kickoff"]).strftime("%H:%M")
+    reason = html.escape(res.get("reason") or "")
+    return (f"📋 <b>Aufstellungs-Check</b>\n<b>{k} {html.escape(leg['match'])}</b>\n"
+            f"➡️ <code>{html.escape(leg['label'])}</code>\n{head}" + (f": <i>{reason}</i>" if reason else ""))
 
 
 async def _reminder_loop(engine=None):
@@ -259,9 +281,10 @@ async def _reminder_loop(engine=None):
                 for leg in due_lineup_checks(plan, utcnow(), lineup_min, _reminded):
                     _reminded.add(f"L{leg['match_id']}")
                     res = await loop.run_in_executor(None, lambda leg=leg: runner.analyze_legs(
-                        engine, [leg], max_age_h=0.3, local_time=state.local, max_searches=3))
-                    if res and res[0]["assessment"] == "streichen":
-                        await telegram_bot.notify(_bot, "📋 <b>Aufstellungs-Check vor Anpfiff</b>\n" + res[0]["text"])
+                        engine, [leg], max_age_h=0.3, local_time=state.local, max_searches=4))
+                    text = lineup_alert(leg, res[0]) if res else None
+                    if text:
+                        await telegram_bot.notify(_bot, text)
         except Exception:  # noqa: BLE001
             log.exception("Erinnerung/Aufstellungs-Check fehlgeschlagen")
         await asyncio.sleep(300)

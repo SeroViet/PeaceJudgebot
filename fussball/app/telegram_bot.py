@@ -74,6 +74,9 @@ def top_tips(plan: dict, n: int = 5, day: str | None = None) -> dict[str, list[d
     day = day or now.date().isoformat()
     reports = {l["match_id"]: (l.get("agent") or {})
                for k in ("day_combos", "boost_combos", "torfest_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) for l in c["legs"]}
+    for t in plan.get("top") or []:  # eigenes Urteil des Scouts zu genau diesem Top-Tipp
+        if t.get("agent"):
+            reports[t["match_id"]] = {"assessment": t["agent"], "reason": t.get("reason", "")}
     agent = {mid: r.get("assessment") for mid, r in reports.items()}
     best: dict[int, dict] = {}
     for t in plan.get("top") or plan.get("safe", []):

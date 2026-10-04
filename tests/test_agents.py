@@ -111,6 +111,31 @@ def test_due_lineup_checks_window():
     assert not due_lineup_checks(plan, datetime(2026, 10, 10, 10, 0), 75, set())
 
 
+def test_due_lineup_checks_cover_all_combos_and_top():
+    from fussball.app.jobs import due_lineup_checks, lineup_alert
+
+    leg = lambda mid: {"match_id": mid, "kickoff": "2026-10-10T13:30:00", "match": f"A{mid} – B", "label": "Über 1.5 Tore"}  # noqa: E731
+    plan = {"day_combos": [{"legs": [leg(1)]}], "boost_combos": [{"legs": [leg(2), leg(1)]}],
+            "krass_combos": [{"legs": [leg(3)]}], "top": [leg(4), leg(2)]}
+    due = due_lineup_checks(plan, datetime(2026, 10, 10, 12, 15), 75, {"L3"})
+    assert sorted(x["match_id"] for x in due) == [1, 2, 4]
+    assert lineup_alert(leg(1), {"assessment": "bestätigt"}) is None
+    text = lineup_alert(leg(1), {"assessment": "vorsicht", "reason": "Stammtorwart fehlt"})
+    assert "🔴" in text and "Stammtorwart fehlt" in text and "<code>Über 1.5 Tore</code>" in text
+    assert "Nicht setzen" in lineup_alert(leg(1), {"assessment": "streichen", "reason": ""})
+
+
+def test_top_tips_use_own_agent_verdict(monkeypatch):
+    from fussball import service
+
+    t = {"match_id": 7, "label": "Über 1.5 Tore", "agent": "vorsicht", "reason": "3 Stürmer fehlen"}
+    plan = type("P", (), {})()
+    plan.top = [{"match_id": 7, "label": "Über 1.5 Tore"}, {"match_id": 8, "label": "Unter 3.5 Tore"}]
+    service.carry_top_agents(plan, [t, {"match_id": 8, "label": "Über 2.5 Tore", "agent": "streichen"}])
+    assert plan.top[0]["agent"] == "vorsicht" and plan.top[0]["reason"] == "3 Stürmer fehlen"
+    assert "agent" not in plan.top[1]  # anderer Tipp: altes Urteil gilt nicht
+
+
 def test_apply_agents_replaces_caution_leg_if_possible(engine, fixture_bytes, bundesliga, monkeypatch):
     monkeypatch.setattr(runner, "fatigue_context", lambda e, mid: "ctx")
     plan = _plan_with_matches(engine, fixture_bytes, bundesliga)
@@ -251,7 +276,28 @@ def test_check_tips_reuses_research_cheaply(engine, fixture_bytes, bundesliga, m
     second = runner.check_tips(engine, [item], client=client)
     assert client.calls == 1  # zweites Mal: keine neue Websuche, nur Bewertung der gespeicherten Fakten
     assert second[0]["assessment"] == "streichen"
-    assert runner.other_costs_today(engine)["n"] == 1
+    assert runner.other_costs_today(engine)["n"] == 0  # derselbe Tipp: Urteil direkt übernommen (gratis)
+    third = runner.check_tips(engine, [{**item, "label": "Unter 3.5 Tore"}], client=client)
+    assert client.calls == 1 and third[0]["assessment"] == "streichen"
+    assert runner.other_costs_today(engine)["n"] == 1  # anderer Tipp: nur Bewertung der Fakten
     # Spiel nicht in unseren Daten: wird trotzdem über die Teamnamen recherchiert
     unknown = runner.check_tips(engine, [{**item, "match_id": None, "match": "Deutschland – Serbien"}], client=client)
     assert client.calls == 2 and unknown[0]["assessment"] == "bestätigt"
+
+
+def test_apply_agents_top_checks_soonest_safest(monkeypatch):
+    from datetime import timedelta
+
+    from fussball import service
+    from fussball.data.schema import utcnow
+
+    soon, later = (utcnow() + timedelta(hours=3)).isoformat(), (utcnow() + timedelta(hours=40)).isoformat()
+    plan = type("P", (), {})()
+    plan.top = [{"match_id": 1, "match": "A – B", "kickoff": soon, "comp": "X", "label": "Über 1.5 Tore", "prob": 0.8},
+                {"match_id": 2, "match": "C – D", "kickoff": later, "comp": "X", "label": "Über 1.5 Tore", "prob": 0.9}]
+    seen = []
+    monkeypatch.setattr(runner, "check_tips", lambda e, items, **kw: seen.extend(items) or
+                        [{"assessment": "vorsicht", "reason": "Torwart fehlt"} for _ in items])
+    service.apply_agents_top(None, plan)
+    assert [i["match_id"] for i in seen] == [1]  # nur Spiele der nächsten 24 h
+    assert plan.top[0]["agent"] == "vorsicht" and "agent" not in plan.top[1]

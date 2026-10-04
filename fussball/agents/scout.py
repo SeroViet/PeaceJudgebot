@@ -158,7 +158,7 @@ def research(client, match: str, kickoff_local: str, competition: str, tip: str,
     for _ in range(4):  # pause_turn: Server-Tool-Schleife fortsetzen
         resp = client.beta.messages.create(
             model=model, max_tokens=16000, system=SYSTEM, tools=tools, messages=messages,
-            output_config={"effort": "medium"}, betas=[FALLBACK_BETA], fallbacks="default",
+            output_config={"effort": os.getenv("AGENT_EFFORT", "high")}, betas=[FALLBACK_BETA], fallbacks="default",
         )
         n = _count_searches(resp.content)
         searches += n
@@ -209,7 +209,7 @@ class TipJudgement(BaseModel):
 def judge_tip(client, intel: MatchIntel, match: str, tip: str, model: str = MODEL) -> tuple[TipJudgement, float]:
     """Einen weiteren Tipp für ein schon recherchiertes Spiel bewerten – ohne neue Websuche (günstig)."""
     resp = client.beta.messages.parse(
-        model=model, max_tokens=2000, output_format=TipJudgement, output_config={"effort": "low"},
+        model=model, max_tokens=4000, output_format=TipJudgement, output_config={"effort": "medium"},
         betas=[FALLBACK_BETA], fallbacks="default",
         messages=[{"role": "user", "content":
                    f"Spiel: {match}\nZu bewertender Tipp: {tip}\n\nRecherchierte Fakten (JSON):\n"

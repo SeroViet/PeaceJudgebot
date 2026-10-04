@@ -884,8 +884,9 @@ def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: 
 
     limit = limit or int(os.getenv("AGENT_TOP_MAX", "10"))
     now = utcnow()
-    todo = sorted((t for t in plan.top
-                   if now < datetime.fromisoformat(t["kickoff"]) <= now + timedelta(hours=horizon_h)),
+    min_prob = float(os.getenv("TOP_MIN_PROB", "0.80"))  # nur Tipps, die in /top5 überhaupt in Frage kommen
+    todo = sorted((t for t in plan.top if t["prob"] >= min_prob
+                   and now < datetime.fromisoformat(t["kickoff"]) <= now + timedelta(hours=horizon_h)),
                   key=lambda t: -t["prob"])[:limit]
     if not todo:
         return []

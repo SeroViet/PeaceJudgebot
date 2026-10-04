@@ -67,6 +67,11 @@ def top_n() -> int:
     return int(os.getenv("TOP_TIPS", "6"))
 
 
+def top_min_prob() -> float:
+    """Nur harte, sichere Tipps: mindestens so wahrscheinlich (Standard 80 %)."""
+    return float(os.getenv("TOP_MIN_PROB", "0.80"))
+
+
 def top_tips(plan: dict, n: int | None = None, day: str | None = None) -> dict[str, list[dict]]:
     """Die n sichersten Tipps von heute (ein Tipp pro Spiel, nur Spiele, die noch kommen), nach
     Wettbewerbs-Art getrennt. Spiele, bei denen der Scout warnt oder streicht, fallen weg."""
@@ -82,12 +87,15 @@ def top_tips(plan: dict, n: int | None = None, day: str | None = None) -> dict[s
         if t.get("agent"):
             reports[t["match_id"]] = {"assessment": t["agent"], "reason": t.get("reason", "")}
     agent = {mid: r.get("assessment") for mid, r in reports.items()}
+    # Hat der Scout heute schon geprüft, kommen nur noch von ihm bestätigte Spiele (🟢) in die Liste
+    checked = any(t.get("agent") for t in plan.get("top") or [])
     best: dict[int, dict] = {}
     for t in plan.get("top") or plan.get("safe", []):
         k = state.local(t["kickoff"])
         if (k.date().isoformat() != day or k <= now or t["market"] not in COMBO_MARKETS
                 or (t["market"], t["selection"]) in EXCLUDED_TIPS or agent.get(t["match_id"]) in ("streichen", "vorsicht")
-                or ((t["market"], t["selection"]) == ("OU4.5", "U") and t.get("profile") != "zaeh")):
+                or ((t["market"], t["selection"]) == ("OU4.5", "U") and t.get("profile") != "zaeh")
+                or t["prob"] < top_min_prob() or (checked and agent.get(t["match_id"]) != "bestätigt")):
             continue
         if t["prob"] > best.get(t["match_id"], {}).get("prob", 0):
             best[t["match_id"]] = {**t, "agent": agent.get(t["match_id"]),
@@ -126,7 +134,10 @@ def format_top5(plan: dict, n: int | None = None) -> str:
                           else ""))
         if len(ts) > 1:
             out.append(f"<i>Alle {len(ts)} als Kombi: Chance {prob:.0%}</i>")
-    out.append("\n<i>🟢 = Scout hat Aufstellung, Ausfälle &amp; Torwart geprüft. Gewarnte Spiele sind schon raus.</i>")
+    if any(t.get("agent") for t in plan.get("top") or []):
+        out.append("\n<i>🟢 = Scout hat Ausfälle, Torwart, Form &amp; letztes Duell geprüft. Nur bestätigte Spiele.</i>")
+    else:
+        out.append("\n<i>⚪ Noch nicht vom Scout geprüft – die geprüfte Liste kommt um 09:00.</i>")
     return "\n".join(out)
 
 
@@ -515,18 +526,13 @@ def format_stats(engine) -> str:
 
 COMMANDS = [
     ("top5", "Die 5–6 sichersten Tipps von heute, vom Scout geprüft"),
-    ("tageskombi", "3er- und 5er-Kombi, alle Spiele am selben Tag"),
-    ("boost", "Boost-Kombi: Tipps ab Quote 1.50 + Sporttip-KombiBoost"),
-    ("torfest", "Torfest: 1. Halbzeit Über 1.5 in den torreichsten Spielen"),
-    ("risiko", "Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8"),
-    ("krass", "Krass-Kombi: 3 BetBuilder, Quote ca. 8–25"),
+    ("tageskombi", "Sichere 3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("ergebnisse", "Deine Tipps: 🟢 gewonnen / 🔴 verloren"),
     ("kosten", "Claude-Kosten heute"),
     ("sicher", "Tipps mit hoher Trefferquote"),
     ("heute", "Top-Tipps von heute (wie /top5)"),
     ("analyse", "Agenten-Analyse: /analyse Team"),
     ("spiel", "Prognose zu einem Spiel: /spiel Team"),
-    ("kombi", "Value-Kombis"),
     ("bilanz", "Gewinn, Verlust, Trefferquote"),
     ("gesetzt", "Wette erfassen: /gesetzt T1 10 2.10"),
     ("update", "Daten und Tipps neu berechnen"),

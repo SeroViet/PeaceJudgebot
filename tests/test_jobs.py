@@ -105,9 +105,16 @@ def test_top5_short_and_by_category():
     assert text.count("➡️") == 6  # die 6 sichersten Tipps insgesamt, ein Tipp pro Spiel
     assert "Unter 4.5" not in text and len(text) < 1500
     # Spiele, bei denen der Scout warnt, fallen ganz weg
-    warned = [{**t, "agent": "vorsicht", "reason": "Torwart fehlt"} if t["match_id"] == 7 else t for t in safe]
-    text = telegram_bot.format_top5({"top": warned})
+    assert "⚪ Noch nicht vom Scout geprüft" in text
+    # nach der Prüfung: nur bestätigte Spiele (🟢); gewarnte und ungeprüfte fallen weg
+    checked = [{**t, "agent": "vorsicht", "reason": "Torwart fehlt"} if t["match_id"] == 7
+               else {**t, "agent": "bestätigt"} if t["match_id"] in (3, 5) else t for t in safe]
+    text = telegram_bot.format_top5({"top": checked})
     assert "H7 – A7" not in text and "Torwart fehlt" not in text
+    assert text.count("➡️") == 2 and text.count("🟢") >= 2
+    # Tipps unter 80 % kommen nicht in die sicheren Tipps
+    low = [{**t, "prob": 0.78} for t in safe]
+    assert "📭" in telegram_bot.format_top5({"top": low})
 
 
 def test_boost_combo_tips_from_150(engine, monkeypatch):

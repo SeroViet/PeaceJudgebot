@@ -107,6 +107,12 @@ Bei Unter-Tipps (z. B. "Unter 3.5 / 4.5 Tore") prüfe besonders: Muss ein Team u
 oder aufholen (offenes Spiel)? Kehren Torjäger zurück? Fehlen Stammverteidiger oder der Stammtorhüter?
 Gab es zuletzt torreiche direkte Duelle? Solche Fakten sprechen gegen einen Unter-Tipp.
 
+Bei Tore-Tipps für ein Team (z. B. "Deutschland über 1.5 Tore") oder Über-Tipps prüfe besonders:
+Wie endete das LETZTE direkte Duell (auch wenn es erst Tage her ist)? Hat das Team dort oder in den
+letzten 3 Spielen kaum getroffen? Mauert der Gegner (tiefe Abwehr, viele Spiele zu null)? Gibt es einen
+neuen Trainer, mit dem das Team noch wenig trifft? Ein Team, das gegen genau diesen Gegner zuletzt nicht
+getroffen hat, oder 2 der letzten 3 Spiele höchstens 1 Tor erzielte, ist ein konkreter Grund für "vorsicht".
+
 Regeln für die Bewertung:
 - Das Spiel findet zum angegebenen Termin statt. Zweifle Termin oder Ansetzung nie an.
 - "streichen" nur bei konkreten, gewichtigen Fakten gegen den Tipp (z. B. Torjäger und Ersatz fehlen

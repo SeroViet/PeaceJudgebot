@@ -128,7 +128,7 @@ def test_boost_combo_tips_from_150(engine, monkeypatch):
     if (start + timedelta(hours=6)).date() != start.date():
         return  # kurz vor Mitternacht nicht prüfbar
     kick = start.astimezone(__import__("zoneinfo").ZoneInfo("UTC")).replace(tzinfo=None)
-    fs = [MatchForecast(i, "soccer_usa_mls", "MLS", kick + timedelta(minutes=30 * i), f"H{i}", f"A{i}", 1.6, 1.3,
+    fs = [MatchForecast(i, "soccer_epl", "EPL", kick + timedelta(minutes=30 * i), f"H{i}", f"A{i}", 1.6, 1.3,
                         {}, {}, {}, None, None, 0.0, {},
                         implied={"OU2.5": {"O": 0.60, "U": 0.40}, "OU1.5": {"O": 0.85, "U": 0.15},
                                  "BTTS": {"Y": 0.58, "N": 0.42}}) for i in range(6)]
@@ -168,3 +168,23 @@ def test_torfest_only_high_scoring_matches(engine, monkeypatch):
     assert all(l["market"] == "H1_OU1.5" and l["selection"] == "O" for l in tf[0]["legs"])
     text = telegram_bot.format_day_combos({"day_combos": [{**tf[0], "id": "F1"}]})
     assert "Torfest-Kombi" in text and "1. Halbzeit: Über 1.5 Tore" in text
+
+
+def test_daily_catch_up_after_restart(engine):
+    from datetime import datetime
+
+    from fussball.agents import runner
+    from fussball.app import jobs, state
+
+    at = lambda h: datetime(2026, 10, 5, h, 0, tzinfo=state.TZ)  # noqa: E731
+    assert not jobs.needs_catch_up(engine, "09:00", at(8))  # vor 09:00: normal warten
+    assert jobs.needs_catch_up(engine, "09:00", at(11))  # Neustart um 11 Uhr: nachholen
+    assert not jobs.needs_catch_up(engine, "09:00", at(21))  # abends nicht mehr
+    runner.mark_daily_done(engine)
+    assert not jobs.needs_catch_up(engine, "09:00", datetime.now(state.TZ).replace(hour=11))
+    assert "· Tipps " in runner.pin_text(engine) and runner.parse_pin_daily(runner.pin_text(engine))
+
+
+def test_empty_top_explains_why():
+    text = telegram_bot.format_top5({"top": []})
+    assert "keine sicheren Tipps" in text and "Lieber kein Tipp" in text

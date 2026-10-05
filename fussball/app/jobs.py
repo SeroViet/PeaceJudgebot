@@ -92,6 +92,8 @@ async def _restore_costs(engine) -> None:
         chat = await _bot.bot.get_chat(owner)
         pinned = chat.pinned_message
         usd = runner.parse_pin(pinned.text if pinned else None)
+        if runner.parse_pin_daily(pinned.text if pinned else None):
+            runner.mark_daily_done(engine)  # Tipps kamen heute schon – nach Neustart nicht doppelt prüfen
         if usd:
             runner.restore_carryover(engine, usd)
             log.info("Tageskosten nach Neustart übernommen: %.2f $", usd)
@@ -150,7 +152,8 @@ async def _refresh_loop(engine):
         except Exception:  # noqa: BLE001
             log.exception("Erststart fehlgeschlagen")
     every = float(os.getenv("REFRESH_HOURS", "3"))
-    first = os.getenv("STARTUP_TIPS", "1") == "1"
+    # Beim Start keine ungeprüfte Liste mehr: die geprüften Tipps kommen vom Tageslauf (oder seinem Nachholen)
+    first = os.getenv("STARTUP_TIPS", "0") == "1"
     while True:
         try:
             info = await loop.run_in_executor(None, lambda: state.refresh(engine, days=int(os.getenv("TIP_DAYS", "3"))))
@@ -179,6 +182,16 @@ async def _refresh_loop(engine):
         await asyncio.sleep(every * 3600)
 
 
+def needs_catch_up(engine, when: str, now: datetime | None = None) -> bool:
+    """Lief die Tagesprüfung heute noch nicht, obwohl es schon nach `when` ist (und vor CATCHUP_UNTIL)?"""
+    from fussball.agents import runner
+
+    now = now or datetime.now(state.TZ)
+    h, m = map(int, when.split(":"))
+    until = int(os.getenv("CATCHUP_UNTIL_HOUR", "20"))
+    return time(h, m) <= now.time() and now.hour < until and runner.daily_done(engine) is None
+
+
 def _seconds_until(hhmm: str) -> float:
     now = datetime.now(state.TZ)
     h, m = map(int, hhmm.split(":"))
@@ -193,8 +206,14 @@ async def _daily_loop(engine=None):
     Agentenlauf – Neustarts lösen keine Agenten aus), dann die Tageskombi senden."""
     when = os.getenv("DAILY_REPORT_TIME", "09:00")
     loop = asyncio.get_running_loop()
+    await asyncio.sleep(90)  # Kosten aus der angehefteten Nachricht übernehmen, erster Refresh läuft
+    catch_up = engine is not None and needs_catch_up(engine, when)
     while True:
-        await asyncio.sleep(_seconds_until(when))
+        if catch_up:
+            catch_up = False  # Neustart nach 09:00 (z. B. Update): heutige Prüfung jetzt nachholen
+            log.info("Tagesprüfung wird nachgeholt")
+        else:
+            await asyncio.sleep(_seconds_until(when))
         for _ in range(20 if engine is not None else 0):  # läuft gerade ein Refresh: kurz warten
             try:
                 info = await loop.run_in_executor(None, lambda: state.refresh(
@@ -207,6 +226,10 @@ async def _daily_loop(engine=None):
             await asyncio.sleep(30)
         plan = state.load_plan()
         await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
+        if engine is not None:
+            from fussball.agents import runner
+
+            runner.mark_daily_done(engine)
         if os.getenv("DAILY_EXTRA", "0") == "1":  # riskantere Kombis nur auf Wunsch (sonst /boost, /torfest)
             await telegram_bot.notify(_bot, telegram_bot.format_boost(plan))
             await telegram_bot.notify(_bot, telegram_bot.format_boost(

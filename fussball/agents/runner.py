@@ -73,8 +73,37 @@ PIN_PREFIX = "📌 Claude-Kosten"
 
 
 def pin_text(engine: Engine) -> str:
+    done = daily_done(engine)
     return (f"{PIN_PREFIX} (UTC {utcnow().date().isoformat()}): {spent_today(engine):.2f} $ "
-            f"von {daily_budget():.2f} $ Tageslimit")
+            f"von {daily_budget():.2f} $ Tageslimit" + (f" · Tipps {done}" if done else ""))
+
+
+def _local_today() -> str:
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo("Europe/Zurich")).date().isoformat()
+
+
+def daily_done(engine: Engine) -> str | None:
+    """Datum (Schweizer Zeit), an dem die tägliche Prüfung zuletzt lief – nur wenn heute, sonst None."""
+    with session_scope(engine) as s:
+        row = s.get(AppSetting, "daily_done")
+        return row.value if row and row.value == _local_today() else None
+
+
+def mark_daily_done(engine: Engine, day: str | None = None) -> None:
+    day = day or _local_today()
+    with session_scope(engine) as s:
+        row = s.get(AppSetting, "daily_done")
+        if row:
+            row.value = day
+        else:
+            s.add(AppSetting(key="daily_done", value=day))
+
+
+def parse_pin_daily(text: str | None) -> bool:
+    """Steht in der angehefteten Nachricht, dass die Tipps heute schon verschickt wurden?"""
+    return f"Tipps {_local_today()}" in (text or "")
 
 
 def parse_pin(text: str | None) -> float | None:

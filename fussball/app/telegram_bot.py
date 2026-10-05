@@ -110,11 +110,32 @@ def top_tips(plan: dict, n: int | None = None, day: str | None = None) -> dict[s
     return by_cat
 
 
+def why_no_tips(plan: dict) -> str:
+    """Kurz erklären, warum keine Tipps kamen (statt einfach nichts zu schicken)."""
+    from datetime import datetime
+
+    now = datetime.now(state.TZ)
+    today = [t for t in plan.get("top") or []
+             if state.local(t["kickoff"]).date() == now.date() and state.local(t["kickoff"]) > now
+             and t["prob"] >= top_min_prob()]
+    if not today:
+        return ("Heute gibt es kein europäisches Spiel mit mindestens "
+                f"{top_min_prob():.0%} Chance (z. B. Länderspielpause oder wenig Spiele). Lieber kein Tipp als ein unsicherer.")
+    warned = sum(t.get("agent") in ("vorsicht", "streichen") for t in today)
+    unchecked = sum(t.get("agent") in (None, "ungeprüft") for t in today)
+    parts = [f"{len(today)} Spiele kamen in Frage"]
+    if warned:
+        parts.append(f"{warned} haben die Agenten wegen Risiko gestrichen")
+    if unchecked:
+        parts.append(f"{unchecked} konnten nicht geprüft werden (Tageslimit – in Render AGENT_DAILY_BUDGET_USD erhöhen)")
+    return " · ".join(parts) + "."
+
+
 def format_top5(plan: dict, n: int | None = None) -> str:
     """Kurz und klar: die sichersten Tipps von heute, je Wettbewerbs-Art, eine Zeile pro Spiel."""
     groups = top_tips(plan, n)
     if not groups:
-        return "📭 Heute keine sicheren Tipps mehr. Morgen früh kommen neue."
+        return "📭 <b>Heute keine sicheren Tipps</b>\n" + why_no_tips(plan)
     icon = {"bestätigt": " 🟢", "vorsicht": " 🔴"}
     out = ["🛡️ <b>Sichere Tipps heute</b>"]
     for cat in SHORT_CAT:

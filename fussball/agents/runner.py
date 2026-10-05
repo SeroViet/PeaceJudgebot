@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from datetime import datetime, timedelta
 
 from sqlalchemy import Engine, or_, select
@@ -44,29 +45,34 @@ def other_costs_today(engine: Engine) -> dict:
                                                                   "carry": 0.0}
 
 
+_cost_lock = threading.Lock()  # Agenten laufen parallel: Kostenzähler nur nacheinander ändern
+
+
 def restore_carryover(engine: Engine, usd: float) -> None:
     """Nach einem Neustart: heute bereits ausgegebene Kosten (aus der angehefteten Telegram-Nachricht)
     wieder einrechnen, damit das Tageslimit über Neustarts hinweg gilt."""
-    v = other_costs_today(engine)
-    v.update(usd=v["usd"] - v.get("carry", 0.0) + usd, carry=usd)
-    with session_scope(engine) as s:
-        row = s.get(AppSetting, "claude_other_costs")
-        if row:
-            row.value = v
-        else:
-            s.add(AppSetting(key="claude_other_costs", value=v))
+    with _cost_lock:
+        v = other_costs_today(engine)
+        v.update(usd=v["usd"] - v.get("carry", 0.0) + usd, carry=usd)
+        with session_scope(engine) as s:
+            row = s.get(AppSetting, "claude_other_costs")
+            if row:
+                row.value = v
+            else:
+                s.add(AppSetting(key="claude_other_costs", value=v))
 
 
 def add_other_cost(engine: Engine, usd: float) -> None:
     """Kosten ausserhalb des Scouts (z. B. Screenshot lesen) dem Tageszähler hinzufügen."""
-    v = other_costs_today(engine)
-    v.update(usd=v["usd"] + usd, n=v["n"] + 1)
-    with session_scope(engine) as s:
-        row = s.get(AppSetting, "claude_other_costs")
-        if row:
-            row.value = v
-        else:
-            s.add(AppSetting(key="claude_other_costs", value=v))
+    with _cost_lock:
+        v = other_costs_today(engine)
+        v.update(usd=v["usd"] + usd, n=v["n"] + 1)
+        with session_scope(engine) as s:
+            row = s.get(AppSetting, "claude_other_costs")
+            if row:
+                row.value = v
+            else:
+                s.add(AppSetting(key="claude_other_costs", value=v))
 
 
 PIN_PREFIX = "📌 Claude-Kosten"

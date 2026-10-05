@@ -286,7 +286,7 @@ def test_check_tips_reuses_research_cheaply(engine, fixture_bytes, bundesliga, m
     assert client.calls == 2 and unknown[0]["assessment"] == "bestätigt"
 
 
-def test_apply_agents_top_checks_soonest_safest(monkeypatch):
+def test_apply_agents_top_checks_soonest_safest(engine, monkeypatch):
     from datetime import timedelta
 
     from fussball import service
@@ -299,7 +299,7 @@ def test_apply_agents_top_checks_soonest_safest(monkeypatch):
     seen = []
     monkeypatch.setattr(runner, "check_tips", lambda e, items, **kw: seen.extend(items) or
                         [{"assessment": "vorsicht", "reason": "Torwart fehlt"} for _ in items])
-    service.apply_agents_top(None, plan)
+    service.apply_agents_top(engine, plan)
     assert [i["match_id"] for i in seen] == [1]  # nur Spiele der nächsten 24 h
     assert plan.top[0]["agent"] == "vorsicht" and "agent" not in plan.top[1]
 
@@ -325,7 +325,7 @@ def test_challenge_agent_can_overrule_scout(engine, monkeypatch):
     monkeypatch.setenv("AGENT_DAILY_BUDGET_USD", "0")
     plan.top = [{**plan.top[1], "agent": None, "challenged": False}]
     service.apply_agents_top(engine, plan, client=client)
-    assert plan.top[0]["agent"] == "ungeprüft"
+    assert plan.top[0]["agent"] is None  # nicht geprüft → wird nicht gezeigt
 
 
 def test_top_check_stops_when_six_passed(engine, monkeypatch):
@@ -344,6 +344,45 @@ def test_top_check_stops_when_six_passed(engine, monkeypatch):
     monkeypatch.setattr(runner, "challenge_tips", lambda e, items, **kw: attacked.extend(items) or
                         [{"assessment": "streichen" if items[0]["match_id"] == 2 else "bestätigt", "reason": "y"}])
     service.apply_agents_top(engine, plan)
-    assert [t["match_id"] for t in scouted] == list(range(8))  # 1 und 2 fallen raus → bis Spiel 7 geprüft
+    assert sorted(t["match_id"] for t in scouted) == list(range(8))  # 1 und 2 fallen raus → bis Spiel 7 geprüft
     assert 1 not in [t["match_id"] for t in attacked]  # gewarnter Tipp wird nicht noch gegengeprüft
     assert sum(t.get("agent") == "bestätigt" for t in plan.top) == 6 and "agent" not in plan.top[8]
+
+
+def test_top_check_runs_in_parallel_and_respects_budget(engine, monkeypatch):
+    import threading
+    import time as _time
+    from datetime import timedelta
+
+    from fussball import service
+    from fussball.data.schema import utcnow
+
+    soon = (utcnow() + timedelta(hours=3)).isoformat()
+    plan = type("P", (), {})()
+    plan.top = [{"match_id": i, "match": f"H{i} – A{i}", "kickoff": soon, "comp": "X", "label": "Über 1.5 Tore",
+                 "prob": 0.89 - i / 100} for i in range(8)]
+    active, peak = [0], [0]
+    lock = threading.Lock()
+
+    def slow_check(e, items, **kw):
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        _time.sleep(0.05)
+        with lock:
+            active[0] -= 1
+        runner.add_other_cost(e, 0.3)
+        return [{"assessment": "bestätigt", "reason": ""}]
+
+    monkeypatch.setattr(runner, "check_tips", slow_check)
+    monkeypatch.setattr(runner, "challenge_tips", lambda e, items, **kw: runner.add_other_cost(e, 0.3) or
+                        [{"assessment": "bestätigt", "reason": ""}])
+    service.apply_agents_top(engine, plan)
+    assert peak[0] > 1  # mehrere Spiele gleichzeitig
+    assert sum(t.get("agent") == "bestätigt" for t in plan.top) == 6
+    # Budget reicht nur für 2 Spiele (je 0.6 $ Reserve): nur 2 werden geprüft
+    monkeypatch.setenv("AGENT_DAILY_BUDGET_USD", str(runner.spent_today(engine) + 1.3))
+    for t in plan.top:
+        t.pop("agent", None)
+    service.apply_agents_top(engine, plan)
+    assert sum(t.get("agent") == "bestätigt" for t in plan.top) == 2

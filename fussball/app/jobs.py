@@ -201,6 +201,30 @@ def _seconds_until(hhmm: str) -> float:
     return (target - now).total_seconds()
 
 
+async def _run_daily(engine, loop) -> None:
+    """Quoten holen, Agenten prüfen die sicheren Tipps, Tipps verschicken (mit Start- und Fehlermeldung)."""
+    await telegram_bot.notify(_bot, "🔎 <b>Agenten prüfen jetzt die heutigen Spiele</b> (mehrere gleichzeitig) – "
+                              "die sicheren Tipps kommen in ca. 10–20 Minuten.")
+    info: dict = {}
+    for _ in range(40 if engine is not None else 0):  # läuft gerade ein Refresh: kurz warten (max. 20 Min.)
+        info = await loop.run_in_executor(None, lambda: state.refresh(
+            engine, days=int(os.getenv("TIP_DAYS", "3")), agents=True))
+        if not info.get("skipped"):
+            break
+        await asyncio.sleep(30)
+    plan = state.load_plan()
+    await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
+    errs = [t for t in plan.get("top") or [] if t.get("agent") == "fehler"]
+    if errs:  # Fehler nie verschweigen
+        await telegram_bot.notify(_bot, f"⚠️ <b>Agenten-Fehler bei {len(errs)} Spiel(en)</b>\n"
+                                  f"{html.escape(errs[0].get('reason', ''))[:200]}\nDetails: /status")
+    if engine is not None:
+        from fussball.agents import runner
+
+        runner.mark_daily_done(engine)
+    _track_top(engine, plan)
+
+
 async def _daily_loop(engine=None):
     """Einmal täglich: Quoten holen, Scout prüft die Kombis des Tages (einziger kostenpflichtiger
     Agentenlauf – Neustarts lösen keine Agenten aus), dann die Tageskombi senden."""
@@ -208,37 +232,30 @@ async def _daily_loop(engine=None):
     loop = asyncio.get_running_loop()
     await asyncio.sleep(90)  # Kosten aus der angehefteten Nachricht übernehmen, erster Refresh läuft
     catch_up = engine is not None and needs_catch_up(engine, when)
+    retries = 0
     while True:
         if catch_up:
             catch_up = False  # Neustart nach 09:00 (z. B. Update): heutige Prüfung jetzt nachholen
             log.info("Tagesprüfung wird nachgeholt")
         else:
             await asyncio.sleep(_seconds_until(when))
-        for _ in range(20 if engine is not None else 0):  # läuft gerade ein Refresh: kurz warten
-            try:
-                info = await loop.run_in_executor(None, lambda: state.refresh(
-                    engine, days=int(os.getenv("TIP_DAYS", "3")), agents=True))
-            except Exception:  # noqa: BLE001
-                log.exception("Täglicher Lauf fehlgeschlagen")
-                break
-            if not info.get("skipped"):
-                break
-            await asyncio.sleep(30)
+        try:
+            await _run_daily(engine, loop)
+        except Exception as exc:  # noqa: BLE001 – nie still abbrechen
+            log.exception("Tageslauf fehlgeschlagen")
+            await telegram_bot.notify(_bot, f"⚠️ <b>Tagesprüfung fehlgeschlagen</b>: {html.escape(repr(exc))[:300]}\n"
+                                      "Details: /status")
+            retries += 1
+            if retries <= 2:  # nach 10 Minuten nochmals versuchen, damit heute doch noch Tipps kommen
+                catch_up = True
+                await asyncio.sleep(600)
+            continue
+        retries = 0
         plan = state.load_plan()
-        await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
-        errs = [t for t in plan.get("top") or [] if t.get("agent") == "fehler"]
-        if errs:  # Fehler nie verschweigen
-            await telegram_bot.notify(_bot, f"⚠️ <b>Agenten-Fehler bei {len(errs)} Spiel(en)</b>\n"
-                                      f"{html.escape(errs[0].get('reason', ''))[:200]}\nDetails: /status")
-        if engine is not None:
-            from fussball.agents import runner
-
-            runner.mark_daily_done(engine)
         if os.getenv("DAILY_EXTRA", "0") == "1":  # riskantere Kombis nur auf Wunsch (sonst /boost, /torfest)
             await telegram_bot.notify(_bot, telegram_bot.format_boost(plan))
             await telegram_bot.notify(_bot, telegram_bot.format_boost(
                 plan, "torfest_combos", "⚡ <b>Torfest-Kombi heute</b> (2 Tore vor der Pause, torreichste Spiele)"))
-        _track_top(engine, plan)
         if os.getenv("DAILY_FULL", "0") == "1":  # ausführliche Kombis nur auf Wunsch, sonst /tageskombi
             await telegram_bot.notify(_bot, "☀️ <b>Tageskombi heute</b>\n\n" + telegram_bot.format_today(plan))
         # Kosten stehen in der angehefteten Nachricht 📌 und unter /kosten – keine Extra-Nachricht

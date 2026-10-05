@@ -922,38 +922,55 @@ def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: 
                   key=lambda t: -t["prob"])[:limit]
     if not todo:
         return []
-    # Schritt für Schritt, die sichersten zuerst: Scout prüft, Gegenprüfer greift an. Sobald `want` Tipps
-    # beide Prüfungen bestanden haben, ist Schluss – so wird kein Geld für unnötige Recherchen ausgegeben.
+    # Die sichersten zuerst, mehrere Spiele gleichzeitig (schneller): Scout prüft, Gegenprüfer greift an.
+    # Sobald `want` Tipps beide Prüfungen bestanden haben, ist Schluss – kein Geld für unnötige Recherchen.
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
     want = int(os.getenv("TOP_TIPS", "6"))
     challenge = os.getenv("AGENT_CHALLENGE", "1") == "1"
-    res, passed = [], 0
-    for t in todo:
-        if passed >= want:
-            break
+    workers = max(1, int(os.getenv("AGENT_PARALLEL", "4")))
+    per_tip = float(os.getenv("AGENT_COST_PER_TIP", "0.6"))  # Reserve Scout + Gegenprüfer je Spiel
+    deadline = time.monotonic() + 60 * float(os.getenv("AGENT_TOP_MINUTES", "25"))
+
+    def check(t: dict) -> tuple[dict, dict, dict | None]:
         r = runner.check_tips(engine, [t], client=client, local_time=local)[0]
-        res.append(r)
-        if not r.get("assessment"):
-            if "Tageslimit" in r.get("reason", ""):
-                break
-            t["agent"], t["reason"] = "fehler", r.get("reason", "")  # sichtbar machen, nicht verschweigen
-            continue
-        t["agent"], t["reason"] = r["assessment"], r.get("reason", "")
-        if t["agent"] != "bestätigt":
-            continue
-        if challenge:
-            c = runner.challenge_tips(engine, [t], client=client, local_time=local)[0]
-            res.append(c)
-            if c.get("assessment") is None:
-                if "Tageslimit" in c.get("reason", ""):
-                    t["agent"], t["reason"] = "ungeprüft", c.get("reason", "")
-                    break  # Limit erreicht
-                t["agent"], t["reason"] = "fehler", c.get("reason", "")
+        if not challenge or r.get("assessment") != "bestätigt":
+            return t, r, None
+        return t, r, runner.challenge_tips(engine, [t], client=client, local_time=local)[0]
+
+    res, passed, queue, stop = [], 0, list(todo), False
+    while queue and passed < want and not stop and time.monotonic() < deadline:
+        room = int((runner.daily_budget() - runner.spent_today(engine)) // per_tip)
+        k = min(workers, want - passed, len(queue), room)
+        if k <= 0:
+            break  # Tageslimit: lieber weniger Tipps als über das Budget
+        batch, queue = queue[:k], queue[k:]
+        with ThreadPoolExecutor(k) as ex:
+            done = list(ex.map(check, batch))
+        for t, r, c in done:
+            res.append(r)
+            if not r.get("assessment"):
+                if "Tageslimit" in r.get("reason", ""):
+                    stop = True
+                    continue
+                t["agent"], t["reason"] = "fehler", r.get("reason", "")  # sichtbar machen, nicht verschweigen
                 continue
-            if c["assessment"] != "bestätigt":
-                t["agent"], t["reason"] = c["assessment"], c.get("reason", "")
+            t["agent"], t["reason"] = r["assessment"], r.get("reason", "")
+            if t["agent"] != "bestätigt":
                 continue
-            t["challenged"] = True
-        passed += 1
+            if c is not None:
+                res.append(c)
+                if c.get("assessment") is None:
+                    limit_hit = "Tageslimit" in c.get("reason", "")
+                    t["agent"], t["reason"] = ("ungeprüft" if limit_hit else "fehler"), c.get("reason", "")
+                    stop = stop or limit_hit
+                    continue
+                if c["assessment"] != "bestätigt":
+                    t["agent"], t["reason"] = c["assessment"], c.get("reason", "")
+                    continue
+                t["challenged"] = True
+            passed += 1
     return res
 
 

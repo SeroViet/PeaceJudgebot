@@ -200,8 +200,29 @@ def _seconds_until(hhmm: str) -> float:
     return (target - now).total_seconds()
 
 
+_daily_lock = asyncio.Lock()
+
+
+def daily_running() -> bool:
+    return _daily_lock.locked()
+
+
+async def run_daily_now(engine) -> None:
+    """Auf Befehl (/jetzt): Prüfung sofort, auch wenn heute schon gelaufen (Tageslimit gilt weiter)."""
+    try:
+        await _run_daily(engine, asyncio.get_running_loop())
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Prüfung auf Befehl fehlgeschlagen")
+        await telegram_bot.notify(_bot, f"⚠️ <b>Prüfung fehlgeschlagen</b>: {html.escape(repr(exc))[:300]}")
+
+
 async def _run_daily(engine, loop) -> None:
     """Quoten holen, Agenten prüfen die sicheren Tipps, Tipps verschicken (mit Start- und Fehlermeldung)."""
+    async with _daily_lock:
+        await _run_daily_locked(engine, loop)
+
+
+async def _run_daily_locked(engine, loop) -> None:
     await telegram_bot.notify(_bot, "🔎 <b>Agenten prüfen jetzt die heutigen Spiele</b> (mehrere gleichzeitig) – "
                               "die sicheren Tipps kommen in ca. 10–20 Minuten.")
     info: dict = {}

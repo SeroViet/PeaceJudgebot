@@ -226,3 +226,22 @@ def test_status_shows_agents_and_errors():
     assert "Agenten-Fehler: 1" in text and "APIError 529" in text and "Torwart fehlt" in text
     assert "1.20 $ von 4.00 $" in text
     assert "Agenten-Fehler" in telegram_bot.why_no_tips({"top": [top[2]]})
+
+
+def test_run_daily_now_sends_tips(engine, monkeypatch):
+    import asyncio
+
+    from fussball.agents import runner
+    from fussball.app import jobs, state
+
+    sent = []
+
+    async def notify(_bot, text):
+        sent.append(text)
+
+    monkeypatch.setattr(telegram_bot, "notify", notify)
+    monkeypatch.setattr(state, "refresh", lambda engine, days=3, agents=False: {"agent": []})
+    monkeypatch.setattr(state, "load_plan", lambda: {"top": []})
+    asyncio.run(jobs.run_daily_now(engine))
+    assert "Agenten prüfen jetzt" in sent[0] and "Heute keine Tipps" in sent[1]
+    assert runner.daily_done(engine) and not jobs.daily_running()

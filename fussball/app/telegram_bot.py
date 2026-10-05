@@ -605,6 +605,7 @@ COMMANDS = [
     ("top5", "Die 5–6 sichersten Tipps von heute, vom Scout geprüft"),
     ("tageskombi", "Sichere 3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("ergebnisse", "Deine Tipps: 🟢 gewonnen / 🔴 verloren"),
+    ("jetzt", "Agenten jetzt prüfen lassen und 6 Tipps schicken"),
     ("status", "Laufen die Agenten? Geprüft, gestrichen, Fehler"),
     ("kosten", "Claude-Kosten heute"),
     ("sicher", "Tipps mit hoher Trefferquote"),
@@ -759,6 +760,17 @@ def build(engine) -> Application | None:
         await reply(update, format_status(state.load_plan(), runner.spent_today(engine), runner.daily_budget(),
                                           runner.daily_done(engine), state.status().get("last_error")))
 
+    async def cmd_now(update: Update, _ctx):
+        """/jetzt: Agenten-Prüfung sofort starten und 6 Tipps schicken (Tageslimit gilt weiter)."""
+        import asyncio
+
+        from fussball.app import jobs
+
+        if jobs.daily_running():
+            await reply(update, "⏳ Die Agenten prüfen gerade schon – die Tipps kommen gleich.")
+            return
+        asyncio.get_running_loop().create_task(jobs.run_daily_now(engine))
+
     async def cmd_costs(update: Update, _ctx):
         from fussball.agents import runner
 
@@ -837,7 +849,7 @@ def build(engine) -> Application | None:
     app.add_handler(CommandHandler("start", cmd_start))
     for name, fn in (("heute", cmd_today), ("top5", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update),
-                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("boost", cmd_boost), ("torfest", cmd_torfest), ("kosten", cmd_costs), ("ergebnisse", cmd_results), ("status", cmd_status)):
+                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("boost", cmd_boost), ("torfest", cmd_torfest), ("kosten", cmd_costs), ("ergebnisse", cmd_results), ("status", cmd_status), ("jetzt", cmd_now)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     app.add_handler(MessageHandler((filters.PHOTO | filters.Document.IMAGE) & only_owner, on_photo))
     return app

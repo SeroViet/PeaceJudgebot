@@ -123,12 +123,41 @@ def why_no_tips(plan: dict) -> str:
                 f"{top_min_prob():.0%} Chance (z. B. Länderspielpause oder wenig Spiele). Lieber kein Tipp als ein unsicherer.")
     warned = sum(t.get("agent") in ("vorsicht", "streichen") for t in today)
     unchecked = sum(t.get("agent") in (None, "ungeprüft") for t in today)
+    failed = sum(t.get("agent") == "fehler" for t in today)
     parts = [f"{len(today)} Spiele kamen in Frage"]
     if warned:
         parts.append(f"{warned} haben die Agenten wegen Risiko gestrichen")
     if unchecked:
         parts.append(f"{unchecked} konnten nicht geprüft werden (Tageslimit – in Render AGENT_DAILY_BUDGET_USD erhöhen)")
+    if failed:
+        parts.append(f"⚠️ {failed} mit Agenten-Fehler – Details unter /status")
     return " · ".join(parts) + "."
+
+
+def format_status(plan: dict, spent: float, budget: float, daily: str | None, last_error: str | None) -> str:
+    """Läuft alles? Tagesprüfung, Agenten-Urteile, Fehler und Kosten auf einen Blick."""
+    from datetime import datetime
+
+    now = datetime.now(state.TZ)
+    today = [t for t in plan.get("top") or [] if state.local(t["kickoff"]).date() == now.date()]
+    count = lambda *a: sum(t.get("agent") in a for t in today)  # noqa: E731
+    lines = ["🩺 <b>Status</b>",
+             f"{'✅' if daily else '⏳'} Tagesprüfung heute: {'gelaufen' if daily else 'noch nicht gelaufen'}",
+             f"🔎 Spiele heute in Frage: {len(today)}",
+             f"🟢 Von Scout + Gegenprüfer bestätigt: {count('bestätigt')}",
+             f"🔴 Wegen Risiko gestrichen: {count('vorsicht', 'streichen')}",
+             f"⚪ Nicht geprüft (Limit/noch nicht dran): {count(None, 'ungeprüft')}",
+             f"{'⚠️' if count('fehler') else '✅'} Agenten-Fehler: {count('fehler')}",
+             f"💰 Claude heute: {spent:.2f} $ von {budget:.2f} $"]
+    errs = [t for t in today if t.get("agent") == "fehler"][:3]
+    for t in errs:
+        lines.append(f"   · {html.escape(t['match'])}: {html.escape(t.get('reason', ''))[:120]}")
+    if last_error:
+        lines.append(f"⚠️ Letzter Systemfehler: {html.escape(last_error)[:200]}")
+    for t in today:
+        if t.get("agent") in ("vorsicht", "streichen") and t.get("reason"):
+            lines.append(f"🔴 <b>{html.escape(t['match'])}</b>: <i>{html.escape(t['reason'])}</i>")
+    return "\n".join(lines)
 
 
 def format_top5(plan: dict, n: int | None = None) -> str:
@@ -548,6 +577,7 @@ COMMANDS = [
     ("top5", "Die 5–6 sichersten Tipps von heute, vom Scout geprüft"),
     ("tageskombi", "Sichere 3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("ergebnisse", "Deine Tipps: 🟢 gewonnen / 🔴 verloren"),
+    ("status", "Laufen die Agenten? Geprüft, gestrichen, Fehler"),
     ("kosten", "Claude-Kosten heute"),
     ("sicher", "Tipps mit hoher Trefferquote"),
     ("heute", "Top-Tipps von heute (wie /top5)"),
@@ -695,6 +725,12 @@ def build(engine) -> Application | None:
 
         await reply(update, format_results(tracking.recent(engine)))
 
+    async def cmd_status(update: Update, _ctx):
+        from fussball.agents import runner
+
+        await reply(update, format_status(state.load_plan(), runner.spent_today(engine), runner.daily_budget(),
+                                          runner.daily_done(engine), state.status().get("last_error")))
+
     async def cmd_costs(update: Update, _ctx):
         from fussball.agents import runner
 
@@ -773,7 +809,7 @@ def build(engine) -> Application | None:
     app.add_handler(CommandHandler("start", cmd_start))
     for name, fn in (("heute", cmd_today), ("top5", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update),
-                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("boost", cmd_boost), ("torfest", cmd_torfest), ("kosten", cmd_costs), ("ergebnisse", cmd_results)):
+                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("boost", cmd_boost), ("torfest", cmd_torfest), ("kosten", cmd_costs), ("ergebnisse", cmd_results), ("status", cmd_status)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     app.add_handler(MessageHandler((filters.PHOTO | filters.Document.IMAGE) & only_owner, on_photo))
     return app

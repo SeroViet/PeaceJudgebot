@@ -935,15 +935,20 @@ def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: 
         if not r.get("assessment"):
             if "Tageslimit" in r.get("reason", ""):
                 break
+            t["agent"], t["reason"] = "fehler", r.get("reason", "")  # sichtbar machen, nicht verschweigen
             continue
         t["agent"], t["reason"] = r["assessment"], r.get("reason", "")
         if t["agent"] != "bestätigt":
             continue
         if challenge:
             c = runner.challenge_tips(engine, [t], client=client, local_time=local)[0]
+            res.append(c)
             if c.get("assessment") is None:
-                t["agent"], t["reason"] = "ungeprüft", c.get("reason", "")
-                break  # Limit erreicht
+                if "Tageslimit" in c.get("reason", ""):
+                    t["agent"], t["reason"] = "ungeprüft", c.get("reason", "")
+                    break  # Limit erreicht
+                t["agent"], t["reason"] = "fehler", c.get("reason", "")
+                continue
             if c["assessment"] != "bestätigt":
                 t["agent"], t["reason"] = c["assessment"], c.get("reason", "")
                 continue

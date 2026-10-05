@@ -226,6 +226,10 @@ async def _daily_loop(engine=None):
             await asyncio.sleep(30)
         plan = state.load_plan()
         await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
+        errs = [t for t in plan.get("top") or [] if t.get("agent") == "fehler"]
+        if errs:  # Fehler nie verschweigen
+            await telegram_bot.notify(_bot, f"⚠️ <b>Agenten-Fehler bei {len(errs)} Spiel(en)</b>\n"
+                                      f"{html.escape(errs[0].get('reason', ''))[:200]}\nDetails: /status")
         if engine is not None:
             from fussball.agents import runner
 

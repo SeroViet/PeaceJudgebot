@@ -188,3 +188,22 @@ def test_daily_catch_up_after_restart(engine):
 def test_empty_top_explains_why():
     text = telegram_bot.format_top5({"top": []})
     assert "keine sicheren Tipps" in text and "Lieber kein Tipp" in text
+
+
+def test_status_shows_agents_and_errors():
+    from datetime import datetime, timedelta
+
+    from fussball.app import state
+
+    later = datetime.now(state.TZ) + timedelta(minutes=30)
+    if later.date() != datetime.now(state.TZ).date():
+        return
+    kick = later.astimezone(__import__("zoneinfo").ZoneInfo("UTC")).replace(tzinfo=None).isoformat()
+    top = [{"match": "Italien – Türkei", "kickoff": kick, "prob": 0.8, "agent": "bestätigt"},
+           {"match": "A – B", "kickoff": kick, "prob": 0.8, "agent": "vorsicht", "reason": "Torwart fehlt"},
+           {"match": "C – D", "kickoff": kick, "prob": 0.8, "agent": "fehler", "reason": "APIError 529"}]
+    text = telegram_bot.format_status({"top": top}, 1.2, 4.0, "2026-10-05", None)
+    assert "Tagesprüfung heute: gelaufen" in text and "bestätigt: 1" in text and "gestrichen: 1" in text
+    assert "Agenten-Fehler: 1" in text and "APIError 529" in text and "Torwart fehlt" in text
+    assert "1.20 $ von 4.00 $" in text
+    assert "Agenten-Fehler" in telegram_bot.why_no_tips({"top": [top[2]]})

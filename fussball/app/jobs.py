@@ -76,8 +76,7 @@ def _track_top(engine, plan: dict) -> None:
 
     try:
         day = datetime.now(state.TZ).date().isoformat()
-        # nur die geprüften 🟢-Tipps, die du wirklich bekommen hast (nicht die ungeprüfte Liste nach einem Neustart)
-        tips = [t for ts in telegram_bot.top_tips(plan).values() for t in ts if t.get("agent") == "bestätigt"]
+        tips = [t for ts in telegram_bot.top_tips(plan).values() for t in ts]  # alles, was du bekommen hast
         tracking.track_tips(engine, tips, day)
     except Exception:  # noqa: BLE001
         log.exception("Top-Tipps konnten nicht gemerkt werden")

@@ -72,38 +72,56 @@ def top_min_prob() -> float:
     return float(os.getenv("TOP_MIN_PROB", "0.76"))
 
 
+def fill_min_prob() -> float:
+    """Untergrenze zum Auffüllen auf 6 Tipps (Standard 70 %), wenn es nicht genug sichere gibt."""
+    return float(os.getenv("TOP_FILL_PROB", "0.70"))
+
+
+def _tier(t: dict, agent: str | None) -> int:
+    """0 = 🟢 sicher (≥ 76 %), 1 = 🟢 bestätigt (70–76 %), 2 = ⚪ ungeprüft, 3 = 🔴 Agent warnt."""
+    if agent == "bestätigt":
+        return 0 if t["prob"] >= top_min_prob() else 1
+    return 3 if agent == "vorsicht" else 2
+
+
 def top_tips(plan: dict, n: int | None = None, day: str | None = None) -> dict[str, list[dict]]:
-    """Die n sichersten Tipps von heute (ein Tipp pro Spiel, nur Spiele, die noch kommen), nach
-    Wettbewerbs-Art getrennt. Spiele, bei denen der Scout warnt oder streicht, fallen weg."""
-    from datetime import datetime
+    """Jeden Tag n Tipps (Standard 6), so gut wie möglich, nach Wettbewerbs-Art getrennt:
+    zuerst vom Scout + Gegenprüfer bestätigte ab 76 %, dann bestätigte ab 70 %, dann ungeprüfte,
+    zuletzt gewarnte (mit Grund). Gestrichene nie. Reichen die Spiele von heute nicht, kommen
+    Spiele von morgen dazu (mit Datum)."""
+    from datetime import datetime, timedelta
 
     from fussball.service import COMBO_MARKETS, EXCLUDED_TIPS, category
 
     now = datetime.now(state.TZ)
     day = day or now.date().isoformat()
+    tomorrow = (datetime.fromisoformat(day) + timedelta(days=1)).date().isoformat()
     reports = {l["match_id"]: (l.get("agent") or {})
                for k in ("day_combos", "boost_combos", "torfest_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) for l in c["legs"]}
     for t in plan.get("top") or []:  # eigenes Urteil des Scouts zu genau diesem Top-Tipp
         if t.get("agent"):
             reports[t["match_id"]] = {"assessment": t["agent"], "reason": t.get("reason", "")}
     agent = {mid: r.get("assessment") for mid, r in reports.items()}
-    # Hat der Scout heute schon geprüft, kommen nur noch von ihm bestätigte Spiele (🟢) in die Liste
-    checked = any(t.get("agent") for t in plan.get("top") or [])
     best: dict[int, dict] = {}
     for t in plan.get("top") or plan.get("safe", []):
         k = state.local(t["kickoff"])
-        if (k.date().isoformat() != day or k <= now or t["market"] not in COMBO_MARKETS
-                or (t["market"], t["selection"]) in EXCLUDED_TIPS or agent.get(t["match_id"]) in ("streichen", "vorsicht")
+        if (k.date().isoformat() not in (day, tomorrow) or k <= now or t["market"] not in COMBO_MARKETS
+                or (t["market"], t["selection"]) in EXCLUDED_TIPS or agent.get(t["match_id"]) == "streichen"
                 or ((t["market"], t["selection"]) == ("OU4.5", "U") and t.get("profile") != "zaeh")
-                or t["prob"] < top_min_prob() or (checked and agent.get(t["match_id"]) != "bestätigt")):
+                or t["prob"] < fill_min_prob()):
             continue
-        if t["prob"] > best.get(t["match_id"], {}).get("prob", 0):
-            best[t["match_id"]] = {**t, "agent": agent.get(t["match_id"]),
-                                   "reason": reports.get(t["match_id"], {}).get("reason", "")}
+        a = agent.get(t["match_id"])
+        cand = {**t, "agent": a, "reason": reports.get(t["match_id"], {}).get("reason", ""),
+                "tier": _tier(t, a), "later": k.date().isoformat() != day}
+        old = best.get(t["match_id"])
+        if old is None or (cand["tier"], -cand["prob"]) < (old["tier"], -old["prob"]):
+            best[t["match_id"]] = cand
     from fussball.service import _varied
 
-    # die sichersten zuerst; höchstens 2× derselbe Tipp – sonst nächstbester Tipp desselben Spiels
-    chosen = _varied(sorted(best.values(), key=lambda t: -t["prob"]), n or top_n())
+    # Reihenfolge: gewarnte ganz am Schluss, heute vor morgen, bessere Stufe zuerst, dann die sicherste Chance;
+    # höchstens 2× derselbe Tipp – sonst nächstbester Tipp desselben Spiels
+    ranked = sorted(best.values(), key=lambda t: (t["tier"] == 3, t["later"], t["tier"], -t["prob"]))
+    chosen = _varied(ranked, n or top_n())
     by_cat: dict[str, list[dict]] = {}
     for t in sorted(chosen, key=lambda t: t["kickoff"]):
         by_cat.setdefault(category(t["comp"], t.get("comp_name")), []).append(t)
@@ -117,10 +135,10 @@ def why_no_tips(plan: dict) -> str:
     now = datetime.now(state.TZ)
     today = [t for t in plan.get("top") or []
              if state.local(t["kickoff"]).date() == now.date() and state.local(t["kickoff"]) > now
-             and t["prob"] >= top_min_prob()]
+             and t["prob"] >= fill_min_prob()]
     if not today:
-        return ("Heute gibt es kein europäisches Spiel mit mindestens "
-                f"{top_min_prob():.0%} Chance (z. B. Länderspielpause oder wenig Spiele). Lieber kein Tipp als ein unsicherer.")
+        return ("Heute und morgen gibt es kein europäisches Spiel mit mindestens "
+                f"{fill_min_prob():.0%} Chance (z. B. Länderspielpause oder wenig Spiele). Lieber kein Tipp als ein unsicherer.")
     warned = sum(t.get("agent") in ("vorsicht", "streichen") for t in today)
     unchecked = sum(t.get("agent") in (None, "ungeprüft") for t in today)
     failed = sum(t.get("agent") == "fehler" for t in today)
@@ -166,12 +184,13 @@ def format_status(plan: dict, spent: float, budget: float, daily: str | None, la
 
 
 def format_top5(plan: dict, n: int | None = None) -> str:
-    """Kurz und klar: die sichersten Tipps von heute, je Wettbewerbs-Art, eine Zeile pro Spiel."""
+    """Kurz und klar: die Tipps von heute, je Wettbewerbs-Art, eine Zeile pro Spiel."""
     groups = top_tips(plan, n)
     if not groups:
-        return "📭 <b>Heute keine sicheren Tipps</b>\n" + why_no_tips(plan)
-    icon = {"bestätigt": " 🟢", "vorsicht": " 🔴"}
-    out = ["🛡️ <b>Sichere Tipps heute</b>"]
+        return "📭 <b>Heute keine Tipps</b>\n" + why_no_tips(plan)
+    icon = {0: " 🟢", 1: " 🟢", 2: " ⚪", 3: " 🔴"}
+    out = ["🛡️ <b>Tipps heute</b>"]
+    shown = [t for ts in groups.values() for t in ts]
     for cat in SHORT_CAT:
         ts = groups.get(cat)
         if not ts:
@@ -183,16 +202,20 @@ def format_top5(plan: dict, n: int | None = None) -> str:
             from fussball.service import PROFILE_TEXT
 
             hint = f" <i>{PROFILE_TEXT[t['profile']]}</i>" if t.get("profile") in PROFILE_TEXT else ""
-            out.append(f"<b>{state.local(t['kickoff']).strftime('%H:%M')} {t['match']}</b>{hint}\n"
-                       f"➡️ {tip(t['label'])} · {t['prob']:.0%}{icon.get(t.get('agent'), '')}"
-                       + (f"\n<i>🔴 {html.escape(t['reason'])}</i>" if t.get("agent") == "vorsicht" and t.get("reason")
+            k = state.local(t["kickoff"])
+            when = k.strftime("%H:%M") if not t.get("later") else "morgen " + k.strftime("%H:%M")
+            out.append(f"<b>{when} {t['match']}</b>{hint}\n"
+                       f"➡️ {tip(t['label'])} · {t['prob']:.0%}{icon.get(t.get('tier', 2), '')}"
+                       + (f"\n<i>🔴 {html.escape(t['reason'])}</i>" if t.get("tier") == 3 and t.get("reason")
                           else ""))
         if len(ts) > 1:
             out.append(f"<i>Alle {len(ts)} als Kombi: Chance {prob:.0%}</i>")
-    if any(t.get("agent") for t in plan.get("top") or []):
-        out.append("\n<i>🟢 = Scout hat Ausfälle, Torwart, Form &amp; letztes Duell geprüft. Nur bestätigte Spiele.</i>")
-    else:
-        out.append("\n<i>⚪ Noch nicht vom Scout geprüft – die geprüfte Liste kommt um 09:00.</i>")
+    legend = ["🟢 = von Scout + Gegenprüfer bestätigt"]
+    if any(t.get("tier") == 2 for t in shown):
+        legend.append("⚪ = nicht geprüft")
+    if any(t.get("tier") == 3 for t in shown):
+        legend.append("🔴 = Agent warnt – nur klein setzen")
+    out.append("\n<i>" + " · ".join(legend) + "</i>")
     return "\n".join(out)
 
 

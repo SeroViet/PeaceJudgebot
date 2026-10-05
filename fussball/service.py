@@ -906,7 +906,7 @@ def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h
     return list(res.values())
 
 
-def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 24.0,
+def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 40.0,
                      limit: int | None = None) -> list[dict]:
     """Scout prüft auch die Top-Tipps (/top5) der nächsten `horizon_h` Stunden – die sichersten zuerst.
     Ist das Spiel schon recherchiert, wird nur der Tipp anhand der Fakten bewertet (1–2 Rappen).
@@ -914,12 +914,15 @@ def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: 
     from fussball.agents import runner
     from fussball.app.state import local
 
-    limit = limit or int(os.getenv("AGENT_TOP_MAX", "14"))
+    limit = limit or int(os.getenv("AGENT_TOP_MAX", "16"))
     now = utcnow()
-    min_prob = float(os.getenv("TOP_MIN_PROB", "0.76"))  # nur Tipps, die in /top5 überhaupt in Frage kommen
+    strict = float(os.getenv("TOP_MIN_PROB", "0.76"))
+    min_prob = float(os.getenv("TOP_FILL_PROB", "0.70"))  # nur Tipps, die in /top5 überhaupt in Frage kommen
+    today = local(now.isoformat()).date()
+    # heute vor morgen, sichere (ab 76 %) vor Auffüll-Tipps, dann die höchste Chance
     todo = sorted((t for t in plan.top if t["prob"] >= min_prob
                    and now < datetime.fromisoformat(t["kickoff"]) <= now + timedelta(hours=horizon_h)),
-                  key=lambda t: -t["prob"])[:limit]
+                  key=lambda t: (local(t["kickoff"]).date() != today, t["prob"] < strict, -t["prob"]))[:limit]
     if not todo:
         return []
     # Die sichersten zuerst, mehrere Spiele gleichzeitig (schneller): Scout prüft, Gegenprüfer greift an.
@@ -1197,7 +1200,12 @@ def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | N
     plan.all_forecasts = all_fc
     # Bester Tipp pro Spiel direkt im sicheren Bereich wählen (sonst kann ein 78-%-Tore-Tipp mit Bonus
     # einen 85-%-Tipp verdrängen – und das ganze Spiel fiele danach unter die 80-%-Grenze)
-    plan.top = best_tip_per_match(all_fc, float(os.getenv("TOP_MIN_PROB", "0.76")), 0.90)
+    strict = best_tip_per_match(all_fc, float(os.getenv("TOP_MIN_PROB", "0.76")), 0.90)
+    # Spiele ohne Tipp ab 76 %: bester Tipp ab 70 % zum Auffüllen auf 6 Tipps pro Tag
+    have = {t["match_id"] for t in strict}
+    loose = [t for t in best_tip_per_match(all_fc, float(os.getenv("TOP_FILL_PROB", "0.70")), 0.90)
+             if t["match_id"] not in have]
+    plan.top = strict + loose
     return plan
 
 

@@ -104,17 +104,36 @@ def test_top5_short_and_by_category():
     assert "🌍 Länderspiele" in text and "🌎 Südamerika" in text
     assert text.count("➡️") == 6  # die 6 sichersten Tipps insgesamt, ein Tipp pro Spiel
     assert "Unter 4.5" not in text and len(text) < 1500
-    # Spiele, bei denen der Scout warnt, fallen ganz weg
-    assert "⚪ Noch nicht vom Scout geprüft" in text
-    # nach der Prüfung: nur bestätigte Spiele (🟢); gewarnte und ungeprüfte fallen weg
+    assert "⚪ = nicht geprüft" in text  # noch nicht geprüft: trotzdem 6 Tipps, ehrlich markiert
+    # nach der Prüfung: immer 6 Tipps – bestätigte 🟢 zuerst, dann ungeprüfte ⚪, gewarnte 🔴 nur zum Auffüllen
     checked = [{**t, "agent": "vorsicht", "reason": "Torwart fehlt"} if t["match_id"] == 7
+               else {**t, "agent": "streichen"} if t["match_id"] == 6
                else {**t, "agent": "bestätigt"} if t["match_id"] in (3, 5) else t for t in safe]
     text = telegram_bot.format_top5({"top": checked})
-    assert "H7 – A7" not in text and "Torwart fehlt" not in text
-    assert text.count("➡️") == 2 and text.count("🟢") >= 2
-    # Tipps unter 76 % kommen nicht in die sicheren Tipps
-    low = [{**t, "prob": 0.74} for t in safe]
-    assert "📭" in telegram_bot.format_top5({"top": low})
+    assert text.count("➡️") == 6 and text.count("🟢") >= 2
+    assert "H6 – A6" not in text  # gestrichen: nie
+    assert "H7 – A7" not in text  # gewarnt: nicht nötig, es gibt genug bessere
+    assert "H3 – A3" in text and "H5 – A5" in text
+    # Tipps zwischen 70 und 76 % füllen auf; unter 70 % nie
+    assert telegram_bot.format_top5({"top": [{**t, "prob": 0.72} for t in safe]}).count("➡️") == 6
+    assert "📭" in telegram_bot.format_top5({"top": [{**t, "prob": 0.68} for t in safe]})
+
+
+def test_warned_tips_only_fill_up_with_reason():
+    from datetime import datetime, timedelta
+
+    from fussball.app import state
+
+    later = datetime.now(state.TZ) + timedelta(minutes=30)
+    if later.date() != datetime.now(state.TZ).date():
+        return
+    kick = later.astimezone(__import__("zoneinfo").ZoneInfo("UTC")).replace(tzinfo=None).isoformat()
+    top = [{"match_id": i, "match": f"H{i} – A{i}", "kickoff": kick, "comp": "soccer_epl", "comp_name": "EPL",
+            "market": "OU1.5", "selection": "O", "label": "Über 1.5 Tore", "prob": 0.8,
+            "agent": "vorsicht" if i == 0 else "bestätigt", "reason": "Torjäger fehlt" if i == 0 else ""}
+           for i in range(3)]
+    text = telegram_bot.format_top5({"top": top})
+    assert text.count("➡️") == 3 and "Torjäger fehlt" in text and "nur klein setzen" in text
 
 
 def test_boost_combo_tips_from_150(engine, monkeypatch):
@@ -187,7 +206,7 @@ def test_daily_catch_up_after_restart(engine):
 
 def test_empty_top_explains_why():
     text = telegram_bot.format_top5({"top": []})
-    assert "keine sicheren Tipps" in text and "Lieber kein Tipp" in text
+    assert "keine Tipps" in text and "Lieber kein Tipp" in text
 
 
 def test_status_shows_agents_and_errors():

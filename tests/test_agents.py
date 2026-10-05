@@ -292,7 +292,7 @@ def test_apply_agents_top_checks_soonest_safest(engine, monkeypatch):
     from fussball import service
     from fussball.data.schema import utcnow
 
-    soon, later = (utcnow() + timedelta(hours=3)).isoformat(), (utcnow() + timedelta(hours=40)).isoformat()
+    soon, later = (utcnow() + timedelta(hours=3)).isoformat(), (utcnow() + timedelta(hours=50)).isoformat()
     plan = type("P", (), {})()
     plan.top = [{"match_id": 1, "match": "A – B", "kickoff": soon, "comp": "X", "label": "Über 1.5 Tore", "prob": 0.8},
                 {"match_id": 2, "match": "C – D", "kickoff": later, "comp": "X", "label": "Über 1.5 Tore", "prob": 0.9}]
@@ -300,7 +300,7 @@ def test_apply_agents_top_checks_soonest_safest(engine, monkeypatch):
     monkeypatch.setattr(runner, "check_tips", lambda e, items, **kw: seen.extend(items) or
                         [{"assessment": "vorsicht", "reason": "Torwart fehlt"} for _ in items])
     service.apply_agents_top(engine, plan)
-    assert [i["match_id"] for i in seen] == [1]  # nur Spiele der nächsten 24 h
+    assert [i["match_id"] for i in seen] == [1]  # nur Spiele bis morgen
     assert plan.top[0]["agent"] == "vorsicht" and "agent" not in plan.top[1]
 
 

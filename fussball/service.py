@@ -916,7 +916,7 @@ def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: 
 
     limit = limit or int(os.getenv("AGENT_TOP_MAX", "14"))
     now = utcnow()
-    min_prob = float(os.getenv("TOP_MIN_PROB", "0.80"))  # nur Tipps, die in /top5 überhaupt in Frage kommen
+    min_prob = float(os.getenv("TOP_MIN_PROB", "0.76"))  # nur Tipps, die in /top5 überhaupt in Frage kommen
     todo = sorted((t for t in plan.top if t["prob"] >= min_prob
                    and now < datetime.fromisoformat(t["kickoff"]) <= now + timedelta(hours=horizon_h)),
                   key=lambda t: -t["prob"])[:limit]
@@ -1175,7 +1175,7 @@ def daily_plan(engine: Engine, days: int = 2, forecasts: list[MatchForecast] | N
     plan.all_forecasts = all_fc
     # Bester Tipp pro Spiel direkt im sicheren Bereich wählen (sonst kann ein 78-%-Tore-Tipp mit Bonus
     # einen 85-%-Tipp verdrängen – und das ganze Spiel fiele danach unter die 80-%-Grenze)
-    plan.top = best_tip_per_match(all_fc, float(os.getenv("TOP_MIN_PROB", "0.80")), 0.90)
+    plan.top = best_tip_per_match(all_fc, float(os.getenv("TOP_MIN_PROB", "0.76")), 0.90)
     return plan
 
 

@@ -112,8 +112,8 @@ def test_top5_short_and_by_category():
     text = telegram_bot.format_top5({"top": checked})
     assert "H7 – A7" not in text and "Torwart fehlt" not in text
     assert text.count("➡️") == 2 and text.count("🟢") >= 2
-    # Tipps unter 80 % kommen nicht in die sicheren Tipps
-    low = [{**t, "prob": 0.78} for t in safe]
+    # Tipps unter 76 % kommen nicht in die sicheren Tipps
+    low = [{**t, "prob": 0.74} for t in safe]
     assert "📭" in telegram_bot.format_top5({"top": low})
 
 

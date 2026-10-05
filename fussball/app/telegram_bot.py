@@ -68,8 +68,8 @@ def top_n() -> int:
 
 
 def top_min_prob() -> float:
-    """Nur harte, sichere Tipps: mindestens so wahrscheinlich (Standard 80 %)."""
-    return float(os.getenv("TOP_MIN_PROB", "0.80"))
+    """Nur harte, sichere Tipps: mindestens so wahrscheinlich (Standard 76 %)."""
+    return float(os.getenv("TOP_MIN_PROB", "0.76"))
 
 
 def top_tips(plan: dict, n: int | None = None, day: str | None = None) -> dict[str, list[dict]]:

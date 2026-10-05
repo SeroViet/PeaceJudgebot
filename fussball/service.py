@@ -288,6 +288,17 @@ def month_reserve_ok(remaining: int | None, cost: int = 2, today=None, per_day: 
     return remaining - cost >= days_left * per_day
 
 
+# Reihenfolge, in der Quoten geholt werden (Rest danach, nach Anzahl Spiele)
+_PRIORITY = ("nations_league", "world_cup_qualifiers_europe", "euro_qual", "uefa_european", "fifa_world_cup",
+             "champs_league", "europa_league", "conference_league", "epl", "germany_bundesliga", "spain_la_liga",
+             "italy_serie_a", "france_ligue_one", "switzerland", "netherlands", "portugal", "austria", "efl_champ",
+             "bundesliga2", "belgium", "turkey", "spl", "denmark", "italy_serie_b", "spain_segunda", "ligue_two")
+
+
+def _priority(sport: str) -> int:
+    return next((i for i, w in enumerate(_PRIORITY) if w in sport), len(_PRIORITY))
+
+
 def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] | None = None) -> dict:
     """Alle Fussball-Wettbewerbe weltweit (inkl. Nations League, WM-Quali) nach Spielen in den
     nächsten `hours` Stunden durchsuchen (gratis) und für die Wettbewerbe mit den meisten
@@ -324,7 +335,9 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
             with session_scope(engine) as s:
                 out["scores"][sport] = import_scores(s, client, sport)
             st["spent"] += 2
-        for sport, title, n in upcoming_counts(client, hours):
+        # Die Credits reichen nicht für alle Ligen: zuerst Länderspiele, Europapokal und die grossen Ligen
+        upcoming = sorted(upcoming_counts(client, hours), key=lambda x: (_priority(x[0]), -x[2]))
+        for sport, title, n in upcoming:
             if not region_ok(sport, title):  # kein Frauenfussball, nur Europa – spart Credits
                 continue
             last = st["last"].get(sport)
@@ -469,7 +482,7 @@ _SOUTH = ("argentin", "brazil", "chile", "colombia", "peru", "uruguay", "ecuador
 _NORTH = ("usa", "mls", "mexico", "liga_mx", "canada", "concacaf")
 _ASIA = ("japan", "j_league", "j1", "korea", "kleague", "china", "chinese", "saudi", "india", "thailand",
          "australia", "a_league", "qatar", "uae", "iran")
-_EUROPE = ("epl", "england", "efl", "championship", "league_one", "league_two", "germany", "bundesliga", "spain",
+_EUROPE = ("epl", "england", "efl", "fa_cup", "championship", "league_one", "league_two", "germany", "bundesliga", "spain",
            "la_liga", "italy", "serie_a", "serie_b", "france", "ligue", "netherlands", "eredivisie", "portugal",
            "primeira", "belgium", "scotland", "spl", "austria", "switzerland", "denmark", "sweden", "allsvenskan",
            "norway", "eliteserien", "finland", "veikkaus", "poland", "ekstraklasa", "turkey", "super_lig", "greece",

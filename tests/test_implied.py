@@ -297,3 +297,13 @@ def test_last_meeting_blocks_goal_tips(engine):
     tips = best_tip_per_match([f], 0.45, 0.95)
     picked = {(a["market"], a["selection"]) for a in [tips[0], *tips[0]["alternatives"]]}
     assert not picked & {("OU1.5", "O"), ("OU2.5", "O"), ("AWAY1.5", "O"), ("BTTS", "Y")}
+
+
+def test_scan_priority_big_competitions_first():
+    from fussball.service import _priority, region_ok
+
+    order = sorted(["soccer_sweden_superettan", "soccer_epl", "soccer_uefa_nations_league",
+                    "soccer_switzerland_superleague", "soccer_uefa_champs_league"], key=_priority)
+    assert order[:2] == ["soccer_uefa_nations_league", "soccer_uefa_champs_league"]
+    assert order[-1] == "soccer_sweden_superettan"
+    assert region_ok("soccer_fa_cup", "FA Cup")

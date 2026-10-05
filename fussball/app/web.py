@@ -102,7 +102,9 @@ def create_app(engine=None, start_background: bool = True) -> FastAPI:
 
     @app.get("/healthz")
     def healthz():
-        return {"ok": True}
+        import os
+
+        return {"ok": True, "version": os.getenv("RENDER_GIT_COMMIT", "")[:7] or "lokal"}
 
     @app.get("/robots.txt", response_class=PlainTextResponse)
     def robots():

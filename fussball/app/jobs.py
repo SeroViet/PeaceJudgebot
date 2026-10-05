@@ -41,7 +41,7 @@ async def start(engine) -> list:
         await _bot.updater.start_polling(drop_pending_updates=True, timeout=5, poll_interval=1.0,
                                          error_callback=lambda e: log.warning("Telegram-Polling: %s", e))
         log.info("Telegram-Bot gestartet")
-        await telegram_bot.notify(_bot, "✅ <b>PeaceJudge gestartet</b> · /top5 für die Tipps von heute")
+        await telegram_bot.notify(_bot, f"✅ <b>PeaceJudge gestartet</b> · Version <code>{telegram_bot.version()}</code> · /status")
     if _bot is not None:
         await _restore_costs(engine)
     if os.getenv("DISABLE_SCHEDULER") == "1":

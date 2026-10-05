@@ -134,6 +134,11 @@ def why_no_tips(plan: dict) -> str:
     return " · ".join(parts) + "."
 
 
+def version() -> str:
+    """Kurze Commit-Kennung des laufenden Stands (Render setzt RENDER_GIT_COMMIT)."""
+    return os.getenv("RENDER_GIT_COMMIT", "")[:7] or "lokal"
+
+
 def format_status(plan: dict, spent: float, budget: float, daily: str | None, last_error: str | None) -> str:
     """Läuft alles? Tagesprüfung, Agenten-Urteile, Fehler und Kosten auf einen Blick."""
     from datetime import datetime
@@ -141,7 +146,7 @@ def format_status(plan: dict, spent: float, budget: float, daily: str | None, la
     now = datetime.now(state.TZ)
     today = [t for t in plan.get("top") or [] if state.local(t["kickoff"]).date() == now.date()]
     count = lambda *a: sum(t.get("agent") in a for t in today)  # noqa: E731
-    lines = ["🩺 <b>Status</b>",
+    lines = [f"🩺 <b>Status</b> · Version <code>{version()}</code>",
              f"{'✅' if daily else '⏳'} Tagesprüfung heute: {'gelaufen' if daily else 'noch nicht gelaufen'}",
              f"🔎 Spiele heute in Frage: {len(today)}",
              f"🟢 Von Scout + Gegenprüfer bestätigt: {count('bestätigt')}",

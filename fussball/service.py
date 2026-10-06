@@ -966,7 +966,7 @@ def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: i
         combos = [c for c in plan.boost_combos if c["day"] == today][:1]
         if not combos:
             return list(done.values())
-        legs = [l for l in combos[0]["legs"] if l["match_id"] not in done]
+        legs = [lg for lg in combos[0]["legs"] if lg["match_id"] not in done]
         if legs:
             for leg, r in zip(legs, runner.check_tips(engine, legs, client=client, local_time=local)):
                 done[leg["match_id"]] = r

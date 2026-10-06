@@ -410,6 +410,6 @@ def test_boost_combo_checked_and_warned_leg_replaced(engine, monkeypatch):
                           if i["match_id"] == 1 else ""} for i in items])
     service.apply_agents_boost(engine, plan)
     legs = plan.boost_combos[0]["legs"]
-    assert [l["match_id"] for l in legs] == [0, 2, 3, 4, 9]  # gewarntes Spiel 1 ersetzt
+    assert [lg["match_id"] for lg in legs] == [0, 2, 3, 4, 9]  # gewarntes Spiel 1 ersetzt
     assert sorted(checked) == [0, 1, 2, 3, 4, 9]  # schon geprüfte nicht doppelt
-    assert all(l["agent"]["assessment"] == "bestätigt" for l in legs)
+    assert all(lg["agent"]["assessment"] == "bestätigt" for lg in legs)

@@ -307,3 +307,32 @@ def test_scan_priority_big_competitions_first():
     assert order[:2] == ["soccer_uefa_nations_league", "soccer_uefa_champs_league"]
     assert order[-1] == "soccer_sweden_superettan"
     assert region_ok("soccer_fa_cup", "FA Cup")
+
+
+def test_forecast_without_pinnacle_uses_bookmaker_consensus(engine):
+    from datetime import timedelta
+
+    from fussball.data.db import session_scope
+    from fussball.data.schema import Competition, Match, Odds, Team, utcnow
+    from fussball.service import market_forecasts
+
+    now = utcnow()
+    with session_scope(engine) as s:
+        c = Competition(code="soccer_uefa_nations_league", name="UEFA Nations League", kind="international")
+        h, a = Team(name="Zypern"), Team(name="Lettland")
+        s.add_all([c, h, a])
+        s.flush()
+        m = Match(competition_id=c.id, season="2026-27", kickoff_utc=now + timedelta(hours=5), home_team_id=h.id,
+                  away_team_id=a.id, source="odds-api")
+        s.add(m)
+        s.flush()
+        for bm, (ph, pd, pa) in {"B365": (1.58, 3.9, 5.8), "UNIBET": (1.6, 3.8, 5.6), "BWIN": (1.57, 4.0, 5.9)}.items():
+            for sel, price in zip("HDA", (ph, pd, pa)):
+                s.add(Odds(match_id=m.id, bookmaker=bm, market="1X2", line=0.0, selection=sel, price=price,
+                           known_at=now, source="odds-api"))
+            for sel, price in (("O", 1.95), ("U", 1.85)):
+                s.add(Odds(match_id=m.id, bookmaker=bm, market="OU", line=2.5, selection=sel, price=price,
+                           known_at=now, source="odds-api"))
+    fs = market_forecasts(engine, hours=24)
+    assert len(fs) == 1 and fs[0].reference == "Ø"
+    assert 0.55 < fs[0].probs_1x2["H"] < 0.65 and fs[0].implied  # Spiel ohne Pinnacle trotzdem dabei

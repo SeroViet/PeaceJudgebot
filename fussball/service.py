@@ -389,17 +389,60 @@ def market_forecasts(engine: Engine, hours: float = 72.0, now: datetime | None =
                     Odds.match_id == m.id, Odds.bookmaker == "PS", Odds.market == "1X2",
                     Odds.is_closing.is_(False)).order_by(Odds.known_at)).all():
                 prices[sel] = price
-            if set(prices) != {"H", "D", "A"}:
-                continue
-            p1 = dict(zip("HDA", fair_probs([prices["H"], prices["D"], prices["A"]])))
-            tot = pinnacle_total(s, m.id)
+            ref = "PS"
+            if set(prices) == {"H", "D", "A"}:
+                p1 = dict(zip("HDA", fair_probs([prices["H"], prices["D"], prices["A"]])))
+            else:  # kein Pinnacle (oft bei kleineren Spielen): Durchschnitt mehrerer Buchmacher, Marge entfernt
+                p1 = consensus_1x2(s, m.id)
+                if p1 is None:
+                    continue
+                ref = "Ø"
+            tot = pinnacle_total(s, m.id) or consensus_total(s, m.id)
             lam, mu = fit_rates(p1, *(tot if tot else (None, None)))
             home, away = s.get(Team, m.home_team_id).name, s.get(Team, m.away_team_id).name
             implied = {**implied_markets(lam, mu), **halftime_markets(lam, mu)}
             out.append(MatchForecast(m.id, code, cname, m.kickoff_utc, home, away, lam, mu, p1,
                                      implied["OU2.5"], p1, p1, None, 0.0, {}, league_ok=True, mode="markt",
-                                     reference="PS", implied=implied, implied_rates=(lam, mu)))
+                                     reference=ref, implied=implied, implied_rates=(lam, mu)))
     return sorted(out, key=lambda f: f.kickoff_utc)
+
+
+MIN_BOOKS = 3
+
+
+def _latest_by_book(session, match_id: int, market: str) -> dict[str, dict[tuple[float, str], float]]:
+    from fussball.data.schema import Odds
+
+    rows = session.execute(select(Odds.bookmaker, Odds.line, Odds.selection, Odds.price, Odds.known_at).where(
+        Odds.match_id == match_id, Odds.market == market, Odds.is_closing.is_(False))).all()
+    out: dict[str, dict] = {}
+    for bm, line, sel, price, _ in sorted(rows, key=lambda r: r[4]):
+        out.setdefault(bm, {})[(line, sel)] = price
+    return out
+
+
+def consensus_1x2(session, match_id: int) -> dict[str, float] | None:
+    """Faire 1X2-Wahrscheinlichkeiten als Durchschnitt aller Buchmacher (je Marge entfernt), ab 3 Buchmachern."""
+    probs = [fair_probs([v[(0.0, "H")], v[(0.0, "D")], v[(0.0, "A")]])
+             for v in _latest_by_book(session, match_id, "1X2").values()
+             if all((0.0, k) in v for k in "HDA")]
+    if len(probs) < MIN_BOOKS:
+        return None
+    return {k: float(np.mean([p[i] for p in probs])) for i, k in enumerate("HDA")}
+
+
+def consensus_total(session, match_id: int) -> tuple[float, float] | None:
+    """(Linie, faire P(Über)) als Durchschnitt der Buchmacher, Linie nahe 2.5."""
+    by_line: dict[float, list[float]] = {}
+    for v in _latest_by_book(session, match_id, "OU").values():
+        for (line, sel), price in v.items():
+            if sel == "O" and (line, "U") in v:
+                by_line.setdefault(line, []).append(fair_probs([price, v[(line, "U")]])[0])
+    full = {ln: ps for ln, ps in by_line.items() if len(ps) >= MIN_BOOKS}
+    if not full:
+        return None
+    line = min(full, key=lambda ln: abs(ln - 2.5))
+    return line, float(np.mean(full[line]))
 
 
 def pinnacle_total(session, match_id: int) -> tuple[float, float] | None:

@@ -82,6 +82,24 @@ def _track_top(engine, plan: dict) -> None:
         log.exception("Top-Tipps konnten nicht gemerkt werden")
 
 
+def _track_boost(engine, plan: dict) -> None:
+    """Boost-Kombi merken: nach dem letzten Spiel kommt 🟢/🔴 pro Spiel."""
+    if engine is None:
+        return
+    from datetime import datetime
+
+    from fussball import tracking
+
+    try:
+        day = datetime.now(state.TZ).date().isoformat()
+        combo = next((c for c in plan.get("boost_combos", []) if c["day"] == day), None)
+        if combo:
+            tracking.track_tips(engine, combo["legs"], day, batch=f"boost-{day}",
+                                title=f"📋 <b>Ergebnis Boost-Kombi {day[8:10]}.{day[5:7]}.</b>")
+    except Exception:  # noqa: BLE001
+        log.exception("Boost-Kombi konnte nicht gemerkt werden")
+
+
 async def _restore_costs(engine) -> None:
     """Tageskosten aus der angehefteten Nachricht übernehmen (überlebt Neustarts auf dem Gratisplan)."""
     from fussball.agents import runner
@@ -234,6 +252,10 @@ async def _run_daily_locked(engine, loop) -> None:
         await asyncio.sleep(30)
     plan = state.load_plan()
     await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
+    boost = telegram_bot.format_boost(plan) if os.getenv("DAILY_BOOST", "1") == "1" else ""
+    if boost:  # 2. Nachricht: die mutige Boost-Kombi
+        await telegram_bot.notify(_bot, boost)
+        _track_boost(engine, plan)
     errs = [t for t in plan.get("top") or [] if t.get("agent") == "fehler"]
     if errs:  # Fehler nie verschweigen
         await telegram_bot.notify(_bot, f"⚠️ <b>Agenten-Fehler bei {len(errs)} Spiel(en)</b>\n"
@@ -273,8 +295,7 @@ async def _daily_loop(engine=None):
             continue
         retries = 0
         plan = state.load_plan()
-        if os.getenv("DAILY_EXTRA", "0") == "1":  # riskantere Kombis nur auf Wunsch (sonst /boost, /torfest)
-            await telegram_bot.notify(_bot, telegram_bot.format_boost(plan))
+        if os.getenv("DAILY_EXTRA", "0") == "1":  # Torfest nur auf Wunsch (sonst /torfest)
             await telegram_bot.notify(_bot, telegram_bot.format_boost(
                 plan, "torfest_combos", "⚡ <b>Torfest-Kombi heute</b> (2 Tore vor der Pause, torreichste Spiele)"))
         if os.getenv("DAILY_FULL", "0") == "1":  # ausführliche Kombis nur auf Wunsch, sonst /tageskombi

@@ -124,6 +124,11 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
             scope = os.getenv("AGENT_COMBOS", "T").upper()
             checked = agents and letter in scope
             try:
+                if kind == "boost" and os.getenv("DAILY_BOOST", "1") == "1":
+                    # Boost-Kombi ist die 2. Tipp-Nachricht des Tages: beim Tageslauf immer prüfen
+                    if agents:
+                        info["agent"] += service.apply_agents_boost(engine, plan)
+                    continue
                 info["agent"] += service.apply_agents_risky(engine, plan, cached_only=not checked, kind=kind)
             except Exception:  # noqa: BLE001
                 log.exception("Agenten (%s) fehlgeschlagen", kind)

@@ -952,6 +952,45 @@ def build_extra_combos(plan: "DailyPlan", kind: str, skip: set[int] | None = Non
         kc.get("max_prob", 0.50), skip=skip)]
 
 
+def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: int = 2) -> list[dict]:
+    """Boost-Kombi des Tages (2. Tipp-Nachricht): jede Leg wird wie die sicheren Tipps geprüft (schon
+    recherchierte Spiele nur bewertet, 1–2 Rappen). Gewarnte/gestrichene Spiele werden ersetzt.
+    Ergebnis in leg['agent'] = {assessment, reason}; ohne Budget bleibt eine Leg ungeprüft (⚪)."""
+    from fussball.agents import runner
+    from fussball.app.state import local
+
+    today = local(utcnow().isoformat()).date().isoformat()
+    done: dict[int, dict] = {}
+    skip: set[int] = set()
+    for _ in range(rounds):
+        combos = [c for c in plan.boost_combos if c["day"] == today][:1]
+        if not combos:
+            return list(done.values())
+        legs = [l for l in combos[0]["legs"] if l["match_id"] not in done]
+        if legs:
+            for leg, r in zip(legs, runner.check_tips(engine, legs, client=client, local_time=local)):
+                done[leg["match_id"]] = r
+        for leg in combos[0]["legs"]:
+            r = done.get(leg["match_id"]) or {}
+            if r.get("assessment"):
+                leg["agent"] = {"assessment": r["assessment"], "reason": r.get("reason", "")}
+        bad = {mid for mid, r in done.items() if r.get("assessment") in ("vorsicht", "streichen")}
+        if not bad - skip:
+            break
+        skip |= bad
+        rebuilt = build_extra_combos(plan, "boost", skip=skip)
+        if not [c for c in rebuilt if c["day"] == today]:
+            break  # ohne die gewarnten Spiele keine Boost-Kombi mehr möglich: so lassen (Warnung wird gezeigt)
+        plan.boost_combos = rebuilt
+        annotate_value(engine, plan.boost_combos)
+    for c in plan.boost_combos:  # Urteile auch auf neu gebaute Kombis übertragen
+        for leg in c["legs"]:
+            r = done.get(leg["match_id"]) or {}
+            if r.get("assessment") and "agent" not in leg:
+                leg["agent"] = {"assessment": r["assessment"], "reason": r.get("reason", "")}
+    return list(done.values())
+
+
 def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,
                        cached_only: bool = False, kind: str = "risky") -> list[dict]:
     """Scout prüft die Risiko- bzw. Krass-Kombi des nächsten Tages. Gestrichene Spiele werden ersetzt,

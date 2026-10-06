@@ -33,8 +33,9 @@ def _save(s, items: list[dict]) -> None:
 def _store(engine: Engine, new: list[dict]) -> int:
     with session_scope(engine) as s:
         items = _load(s)
-        seen = {(i["match_id"], i["label"]) for i in items}
-        added = [n for n in new if (n["match_id"], n["label"]) not in seen]
+        kind = lambda i: i.get("batch", "").split("-")[0]  # noqa: E731 – top/boost/slip getrennt verfolgen
+        seen = {(kind(i), i["match_id"], i["label"]) for i in items}
+        added = [n for n in new if (kind(n), n["match_id"], n["label"]) not in seen]
         _save(s, items + added)
     return len(added)
 
@@ -74,15 +75,16 @@ def market_parts(market: str, selection: str) -> list[Part] | None:
     return None
 
 
-def track_tips(engine: Engine, tips: list[dict], day: str) -> int:
-    """Die Tipps, die der Bot verschickt hat (Top-Tipps), merken – Ergebnis kommt nach dem letzten Spiel."""
+def track_tips(engine: Engine, tips: list[dict], day: str, batch: str | None = None,
+               title: str | None = None) -> int:
+    """Die Tipps, die der Bot verschickt hat (Top-Tipps, Boost-Kombi), merken – Ergebnis kommt nach dem letzten Spiel."""
     new = []
     for t in tips:
         parts = ([Part(m, sel, float(line), half) for m, sel, line, half in t["parts"]] if t.get("parts")
                  else market_parts(t["market"], t["selection"]))
         if parts:
-            new.append(_item(t["match_id"], t["match"], t["kickoff"], t["label"], parts, f"top-{day}",
-                             f"📋 <b>Ergebnis Top-Tipps {day[8:10]}.{day[5:7]}.</b>"))
+            new.append(_item(t["match_id"], t["match"], t["kickoff"], t["label"], parts, batch or f"top-{day}",
+                             title or f"📋 <b>Ergebnis Top-Tipps {day[8:10]}.{day[5:7]}.</b>"))
     return _store(engine, new)
 
 

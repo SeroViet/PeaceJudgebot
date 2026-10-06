@@ -386,3 +386,30 @@ def test_top_check_runs_in_parallel_and_respects_budget(engine, monkeypatch):
         t.pop("agent", None)
     service.apply_agents_top(engine, plan)
     assert sum(t.get("agent") == "bestätigt" for t in plan.top) == 2
+
+
+def test_boost_combo_checked_and_warned_leg_replaced(engine, monkeypatch):
+    from datetime import timedelta
+
+    from fussball import service
+    from fussball.app import state
+    from fussball.data.schema import utcnow
+
+    day = state.local(utcnow().isoformat()).date().isoformat()
+    kick = (utcnow() + timedelta(hours=2)).isoformat()
+    leg = lambda i: {"match_id": i, "match": f"H{i} – A{i}", "kickoff": kick, "comp": "soccer_epl",  # noqa: E731
+                     "label": "Über 2.5 Tore", "market": "OU2.5", "selection": "O", "prob": 0.6}
+    plan = type("P", (), {})()
+    plan.boost_combos = [{"day": day, "legs": [leg(i) for i in range(5)], "boost": True, "prob": 0.08}]
+    rebuilt = [{"day": day, "legs": [leg(i) for i in (0, 2, 3, 4, 9)], "boost": True, "prob": 0.08}]
+    monkeypatch.setattr(service, "build_extra_combos", lambda plan, kind, skip=None: rebuilt)
+    monkeypatch.setattr(service, "annotate_value", lambda e, c: None)
+    checked = []
+    monkeypatch.setattr(runner, "check_tips", lambda e, items, **kw: checked.extend(i["match_id"] for i in items) or
+                        [{"assessment": "vorsicht" if i["match_id"] == 1 else "bestätigt", "reason": "Torjäger fehlt"
+                          if i["match_id"] == 1 else ""} for i in items])
+    service.apply_agents_boost(engine, plan)
+    legs = plan.boost_combos[0]["legs"]
+    assert [l["match_id"] for l in legs] == [0, 2, 3, 4, 9]  # gewarntes Spiel 1 ersetzt
+    assert sorted(checked) == [0, 1, 2, 3, 4, 9]  # schon geprüfte nicht doppelt
+    assert all(l["agent"]["assessment"] == "bestätigt" for l in legs)

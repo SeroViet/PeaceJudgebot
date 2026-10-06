@@ -412,16 +412,25 @@ def format_boost(plan: dict, key: str = "boost_combos",
 
     today = datetime.now(state.TZ).date().isoformat()
     combos = [c for c in plan.get(key, []) if c["day"] == today]
+    if key == "boost_combos":
+        combos = combos[:1]  # genau eine Boost-Kombi pro Tag
     if not combos:
         return ""
+    icon = {"bestätigt": " 🟢", "vorsicht": " 🔴", "streichen": " ❌"}
     out = [title]
     for c in combos:
         out.append(f"\n<b>{SHORT_CAT.get(c.get('cat'), '')}</b>")
         for l in c["legs"]:
+            a = (l.get("agent") or {})
+            mark = icon.get(a.get("assessment"), " ⚪" if key == "boost_combos" else "")
             out.append(f"<b>{state.local(l['kickoff']).strftime('%H:%M')} {l['match']}</b>\n"
-                       f"➡️ {tip(l['label'])} · {l['prob']:.0%} · Quote ca. {leg_sporttip(l):.2f}")
+                       f"➡️ {tip(l['label'])} · {l['prob']:.0%} · Quote ca. {leg_sporttip(l):.2f}{mark}"
+                       + (f"\n<i>🔴 {html.escape(a['reason'])}</i>"
+                          if a.get("assessment") in ("vorsicht", "streichen") and a.get("reason") else ""))
         out.append(f"<i>Gesamtquote ca. {sporttip_odds(c):.1f}{' + Boost' if c.get('boost') else ''} · "
                    f"Chance {c['prob']:.0%}</i>")
+    if key == "boost_combos":
+        out.append("\n<i>⚠️ Mutiger Schein: gewinnt selten, dafür viel. Nur kleiner Einsatz (z. B. 2–5 CHF).</i>")
     return "\n".join(out)
 
 

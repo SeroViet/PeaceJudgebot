@@ -123,3 +123,14 @@ def test_month_reserve_keeps_credits_for_rest_of_month():
     assert not month_reserve_ok(240, today=date(2026, 10, 1), per_day=8)  # zu viel verbraucht → sparen
     assert month_reserve_ok(20, today=date(2026, 10, 31), per_day=8)  # letzter Tag: alles nutzbar
     assert month_reserve_ok(None)
+
+
+def test_daily_allowance_spreads_credits_and_never_blocks():
+    from datetime import date
+
+    from fussball.service import daily_allowance
+
+    assert daily_allowance(150, 0, today=date(2026, 10, 6)) == 6  # wenig übrig: trotzdem 6 pro Tag (3 Abfragen)
+    assert daily_allowance(500, 0, today=date(2026, 10, 1)) == 16  # 500 / 31 Tage
+    assert daily_allowance(40, 0, today=date(2026, 10, 31)) == 40  # letzter Tag: alles
+    assert daily_allowance(None) > 1000

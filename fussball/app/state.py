@@ -87,6 +87,11 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
         old = load_plan()
         if fetch:
             info["update"] = service.update_data(engine, live=service.live_sports(engine, old))
+            scan = (info["update"] or {}).get("odds_api") or {}
+            _status["last_scan"] = {"at": utcnow().isoformat(timespec="minutes"),
+                                    "fetched": scan.get("fetched", {}), "skipped": scan.get("skipped", [])[:10],
+                                    "credits_today": scan.get("credits_today"), "credits_left": scan.get("credits_left"),
+                                    "budget_today": scan.get("budget_today"), "error": scan.get("error")}
             _status["last_update"] = utcnow().isoformat()
         details: list = []
         info["settled"] = service.settle_bets(engine, details)

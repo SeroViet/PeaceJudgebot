@@ -76,7 +76,7 @@ def create_app(engine=None, start_background: bool = True) -> FastAPI:
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
-        public = request.url.path in ("/login", "/robots.txt", "/manifest.webmanifest", "/sw.js", "/healthz") \
+        public = request.url.path in ("/login", "/robots.txt", "/manifest.webmanifest", "/sw.js", "/healthz", "/diag") \
             or request.url.path.startswith("/static")
         if not public and not request.session.get("auth"):
             if request.url.path.startswith("/api"):
@@ -105,6 +105,26 @@ def create_app(engine=None, start_background: bool = True) -> FastAPI:
         import os
 
         return {"ok": True, "version": os.getenv("RENDER_GIT_COMMIT", "")[:7] or "lokal"}
+
+    @app.get("/diag")
+    def diag():
+        """Öffentliche Kurzdiagnose ohne Tipps und ohne Geheimnisse: läuft alles?"""
+        import os
+
+        from fussball.agents import runner
+
+        plan = state.load_plan()
+        top = plan.get("top") or []
+        verdicts: dict[str, int] = {}
+        for t in top:
+            verdicts[t.get("agent") or "ungeprüft"] = verdicts.get(t.get("agent") or "ungeprüft", 0) + 1
+        st = state.status()
+        return {"version": os.getenv("RENDER_GIT_COMMIT", "")[:7] or "lokal", "plan_generated": plan.get("generated_at"),
+                "forecasts": len(plan.get("forecasts", [])), "top_candidates": len(top), "verdicts": verdicts,
+                "errors": [t.get("reason", "")[:120] for t in top if t.get("agent") == "fehler"][:3],
+                "daily_done": runner.daily_done(engine), "claude_spent": round(runner.spent_today(engine), 2),
+                "claude_budget": runner.daily_budget(), "running": st.get("running"),
+                "last_error": st.get("last_error"), "last_scan": st.get("last_scan")}
 
     @app.get("/robots.txt", response_class=PlainTextResponse)
     def robots():

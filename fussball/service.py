@@ -274,6 +274,18 @@ def _save_odds_state(engine: Engine, st: dict) -> None:
             s.add(AppSetting(key="odds_api_state", value=st))
 
 
+def daily_allowance(remaining: int | None, spent_today: int = 0, today=None) -> int:
+    """Credits für heute: der Rest des Monats gleichmässig auf die verbleibenden Tage verteilt,
+    aber mindestens 6 (Länderspiele/Top-Liga + Ergebnisse), damit jeden Tag Tipps kommen."""
+    import calendar
+
+    if remaining is None:
+        return 10**6
+    today = today or utcnow().date()
+    days_left = calendar.monthrange(today.year, today.month)[1] - today.day
+    return max(int(os.getenv("ODDS_API_MIN_DAILY", "6")), (remaining + spent_today) // (days_left + 1))
+
+
 def month_reserve_ok(remaining: int | None, cost: int = 2, today=None, per_day: int | None = None) -> bool:
     """Monats-Bremse für die Quoten-Credits: nur ausgeben, wenn danach für jeden restlichen Tag des Monats
     noch mindestens ODDS_API_MIN_DAILY (8) Credits bleiben. Wirkt auch über Neustarts (der Zähler 'remaining'
@@ -318,44 +330,52 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
     st = _odds_state(engine)
     out: dict = {"fetched": {}, "scores": {}}
     try:
-        # Ergebnisse zuerst: offene Spiele (Quelle odds-api), deren Anpfiff > 2.5 h her ist
+        from fussball.data.odds_api import SPORT_KEYS
         from fussball.data.schema import Competition
 
-        with session_scope(engine) as s:
-            due = s.execute(select(Competition.code).join(Match, Match.competition_id == Competition.id).where(
-                Match.status == "scheduled", Match.source == "odds-api",
-                Match.kickoff_utc < utcnow() - timedelta(hours=2.5),
-                Match.kickoff_utc > utcnow() - timedelta(days=3)).distinct()).scalars().all()
-        from fussball.data.odds_api import SPORT_KEYS
-
-        for code in due:
-            if st["spent"] + 2 > budget or not month_reserve_ok(client.remaining):
-                break
-            sport = SPORT_KEYS.get(code, code)
-            with session_scope(engine) as s:
-                out["scores"][sport] = import_scores(s, client, sport)
-            st["spent"] += 2
-        # Die Credits reichen nicht für alle Ligen: zuerst Länderspiele, Europapokal und die grossen Ligen
+        # Die Credits reichen nicht für alle Ligen: zuerst Länderspiele, Europapokal und die grossen Ligen.
+        # (Liste der Spiele ist gratis und liefert nebenbei den Credit-Stand.)
         upcoming = sorted(upcoming_counts(client, hours), key=lambda x: (_priority(x[0]), -x[2]))
+        budget = min(budget, daily_allowance(client.remaining, st["spent"]))
+        out["budget_today"] = budget
+
+        def can_spend(limit: int) -> bool:
+            return st["spent"] + 2 <= limit and (client.remaining is None or client.remaining >= 2)
+
+        # 1) Quoten für die Tipps zuerst (ohne Quoten keine Tipps)
         for sport, title, n in upcoming:
             if not region_ok(sport, title):  # kein Frauenfussball, nur Europa – spart Credits
                 continue
             last = st["last"].get(sport)
-            if last and utcnow() - datetime.fromisoformat(last) < timedelta(hours=interval):
-                continue
-            if st["spent"] + 2 > budget - reserve or not month_reserve_ok(client.remaining):
+            if last and last[:10] == utcnow().date().isoformat() and \
+                    utcnow() - datetime.fromisoformat(last) < timedelta(hours=interval):
+                continue  # heute schon geholt
+            if not can_spend(budget - reserve):
                 out.setdefault("skipped", []).append(f"{title} ({n})")
                 continue
             with session_scope(engine) as s:
                 out["fetched"][title] = import_generic(s, client, sport, title)
             st["spent"] += 2
             st["last"][sport] = utcnow().isoformat()
-        # Live-Quoten für die Spiele der Tageskombi
+        # 2) Ergebnisse: offene Spiele (Quelle odds-api), deren Anpfiff > 2.5 h her ist
+        with session_scope(engine) as s:
+            due = s.execute(select(Competition.code).join(Match, Match.competition_id == Competition.id).where(
+                Match.status == "scheduled", Match.source == "odds-api",
+                Match.kickoff_utc < utcnow() - timedelta(hours=2.5),
+                Match.kickoff_utc > utcnow() - timedelta(days=3)).distinct()).scalars().all()
+        for code in due:
+            if not can_spend(budget):
+                break
+            sport = SPORT_KEYS.get(code, code)
+            with session_scope(engine) as s:
+                out["scores"][sport] = import_scores(s, client, sport)
+            st["spent"] += 2
+        # 3) Live-Quoten für die Spiele der Tageskombi
         for sport, title in live or []:
             last = st["last"].get(sport)
             if last and utcnow() - datetime.fromisoformat(last) < timedelta(hours=live_every):
                 continue
-            if st["spent"] + 2 > budget or not month_reserve_ok(client.remaining):
+            if not can_spend(budget):
                 break
             with session_scope(engine) as s:
                 out.setdefault("live", {})[title] = import_generic(s, client, sport, title)

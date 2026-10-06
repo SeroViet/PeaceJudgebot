@@ -244,4 +244,5 @@ def test_run_daily_now_sends_tips(engine, monkeypatch):
     monkeypatch.setattr(state, "load_plan", lambda: {"top": []})
     asyncio.run(jobs.run_daily_now(engine))
     assert "Agenten prüfen jetzt" in sent[0] and "Heute keine Tipps" in sent[1]
-    assert runner.daily_done(engine) and not jobs.daily_running()
+    assert not runner.daily_done(engine)  # keine Tipps → nicht erledigt, ein Neustart versucht es nochmals
+    assert not jobs.daily_running()

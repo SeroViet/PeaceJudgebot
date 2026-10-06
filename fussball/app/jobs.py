@@ -238,7 +238,8 @@ async def _run_daily_locked(engine, loop) -> None:
     if errs:  # Fehler nie verschweigen
         await telegram_bot.notify(_bot, f"⚠️ <b>Agenten-Fehler bei {len(errs)} Spiel(en)</b>\n"
                                   f"{html.escape(errs[0].get('reason', ''))[:200]}\nDetails: /status")
-    if engine is not None:
+    if engine is not None and telegram_bot.top_tips(plan):
+        # nur als erledigt merken, wenn wirklich Tipps kamen – sonst holt ein Neustart die Prüfung nach
         from fussball.agents import runner
 
         runner.mark_daily_done(engine)

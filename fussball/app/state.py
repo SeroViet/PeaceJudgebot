@@ -102,25 +102,26 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
             info["agent"] = service.apply_agents(engine, plan, cached_only=not day_scope)
         except Exception:  # noqa: BLE001 – ohne Agenten weiterarbeiten
             log.exception("Agenten fehlgeschlagen")
+        # Die 6 Tipps des Tages (/top5) IMMER zuerst prüfen – sie bekommen das Budget, egal was in
+        # AGENT_COMBOS steht; ohne Agentenlauf die letzten Urteile übernehmen (kostenlos)
+        try:
+            if agents:
+                info["agent"] += service.apply_agents_top(engine, plan)
+            else:
+                service.carry_top_agents(plan, old.get("top", []))
+        except Exception:  # noqa: BLE001
+            log.exception("Agenten (Top-Tipps) fehlgeschlagen")
         for kind, attr, letter in (("boost", "boost_combos", "B"), ("torfest", "torfest_combos", "F"),
                                    ("risky", "risky_combos", "R"), ("krass", "krass_combos", "X")):
             setattr(plan, attr, service.build_extra_combos(plan, kind))
             service.annotate_value(engine, getattr(plan, attr))
-            # AGENT_COMBOS: was der Scout prüft (B = Boost, F = Torfest, R = Risiko, X = Krass, T = Top-Tipps); Tageskombi immer
+            # AGENT_COMBOS: welche Zusatz-Kombis der Scout danach noch prüft (B, F, R, X) – nur mit Restbudget
             scope = os.getenv("AGENT_COMBOS", "T").upper()
             checked = agents and letter in scope
             try:
                 info["agent"] += service.apply_agents_risky(engine, plan, cached_only=not checked, kind=kind)
             except Exception:  # noqa: BLE001
                 log.exception("Agenten (%s) fehlgeschlagen", kind)
-        # Top-Tipps (/top5): beim täglichen Agentenlauf mitprüfen, sonst letzte Urteile übernehmen
-        try:
-            if agents and "T" in os.getenv("AGENT_COMBOS", "T").upper():
-                info["agent"] += service.apply_agents_top(engine, plan)
-            else:
-                service.carry_top_agents(plan, old.get("top", []))
-        except Exception:  # noqa: BLE001
-            log.exception("Agenten (Top-Tipps) fehlgeschlagen")
         books = plan.config.get("bookmakers") or None
         for combos in (plan.day_combos, plan.boost_combos, plan.torfest_combos, plan.risky_combos,
                        plan.krass_combos):

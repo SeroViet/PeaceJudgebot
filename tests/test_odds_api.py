@@ -134,3 +134,18 @@ def test_daily_allowance_spreads_credits_and_never_blocks():
     assert daily_allowance(500, 0, today=date(2026, 10, 1)) == 16  # 500 / 31 Tage
     assert daily_allowance(40, 0, today=date(2026, 10, 31)) == 40  # letzter Tag: alles
     assert daily_allowance(None) > 1000
+
+
+def test_lite_mode_imports_top_league_without_history(engine):
+    """Ohne football-data-Historie (Lite-Modus) wurden Bundesliga/Premier League mit 0 Spielen importiert."""
+    class Fake:
+        remaining = 100
+
+        def odds(self, sport):
+            return [_event("Borussia Dortmund", "Werder Bremen", "2026-10-09T18:30:00Z")]
+
+    with session_scope(engine) as s:
+        assert oa.import_generic(s, Fake(), "soccer_germany_bundesliga", "Bundesliga - Germany") == 0  # alter Weg
+    with session_scope(engine) as s:
+        n = oa.import_generic(s, Fake(), "soccer_germany_bundesliga", "Bundesliga - Germany", use_history=False)
+        assert n > 0 and s.scalars(select(Match).where(Match.source == "odds-api")).first() is not None

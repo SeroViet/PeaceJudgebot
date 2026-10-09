@@ -362,7 +362,7 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
                 out.setdefault("skipped", []).append(f"{title} ({n})")
                 continue
             with session_scope(engine) as s:
-                out["fetched"][title] = import_generic(s, client, sport, title)
+                out["fetched"][title] = import_generic(s, client, sport, title, use_history=not lite_mode())
             st["spent"] += 2
             st["last"][sport] = utcnow().isoformat()
         # 2) Ergebnisse: offene Spiele (Quelle odds-api), deren Anpfiff > 2.5 h her ist
@@ -381,7 +381,8 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
             if not can_spend(budget):
                 break
             with session_scope(engine) as s:
-                out.setdefault("live", {})[title] = import_generic(s, client, sport, title)
+                out.setdefault("live", {})[title] = import_generic(s, client, sport, title,
+                                                                   use_history=not lite_mode())
             st["spent"] += 2
             st["last"][sport] = utcnow().isoformat()
     except Exception as exc:  # noqa: BLE001

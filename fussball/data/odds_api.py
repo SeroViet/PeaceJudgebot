@@ -294,12 +294,15 @@ def _team(session: Session, name: str) -> int:
     return tid
 
 
-def import_generic(session: Session, client: OddsApiClient, sport_key: str, title: str) -> int:
-    """Quoten eines beliebigen Wettbewerbs; Spiele/Teams werden bei Bedarf angelegt (2 Credits)."""
+def import_generic(session: Session, client: OddsApiClient, sport_key: str, title: str,
+                   use_history: bool = True) -> int:
+    """Quoten eines beliebigen Wettbewerbs; Spiele/Teams werden bei Bedarf angelegt (2 Credits).
+    `use_history=False` (Lite-Modus ohne football-data-Historie): auch Top-Ligen direkt anlegen –
+    sonst findet die Zuordnung keine Spiele und die Quoten gehen verloren."""
     from fussball.cli import current_season_code
     from fussball.data.football_data import season_label
 
-    if sport_key in SPORT_KEYS.values():  # Top-Ligen: Zuordnung zu football-data-Teams
+    if use_history and sport_key in SPORT_KEYS.values():  # Top-Ligen: Zuordnung zu football-data-Teams
         code = next(c for c, k in SPORT_KEYS.items() if k == sport_key)
         return import_odds(session, client, [code]).get(code, 0)
     comp_id = _competition(session, sport_key, title)

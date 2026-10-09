@@ -148,6 +148,10 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
         from fussball import tracking
 
         try:
+            tracking.fill_results(engine)  # Endstände per Agent, falls die Quoten-API keine liefert
+        except Exception:  # noqa: BLE001
+            log.exception("Endstände nicht ermittelt")
+        try:
             tracking.fill_halftime(engine)  # Halbzeitstände für Halbzeit-Tipps per Agent nachschlagen
         except Exception:  # noqa: BLE001
             log.exception("Halbzeitstände nicht ermittelt")

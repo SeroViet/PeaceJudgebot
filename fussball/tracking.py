@@ -3,6 +3,7 @@ mit 🟢 gewonnen / 🔴 verloren gemeldet (nur Spiele, keine Quoten)."""
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 import numpy as np
@@ -12,6 +13,7 @@ from fussball.data.db import session_scope
 from fussball.data.schema import AppSetting, Match, utcnow
 from fussball.models.builder import Part, _mask
 
+log = logging.getLogger(__name__)
 KEY = "tracked_tips"
 MAX_ITEMS = 300
 
@@ -131,6 +133,59 @@ def fill_halftime(engine: Engine, client=None, limit: int = 6) -> int:
                 m.ht_home, m.ht_away = ht.ht_home, ht.ht_away
             filled += 1
     return filled
+
+
+def fill_results(engine: Engine, client=None, limit: int = 12) -> int:
+    """Verfolgte Spiele, die vorbei sein müssten (Anpfiff vor > 2.5 h), aber noch kein Ergebnis haben:
+    Endstand per Agent nachschlagen (ca. 2–4 Rappen pro Spiel, zählt zum Tageslimit). So kommt die
+    🟢/🔴-Meldung auch, wenn die Quoten-API keine Ergebnisse liefert (Credits, Teamnamen)."""
+    from fussball.agents import runner, scout
+
+    with session_scope(engine) as s:
+        need = {}
+        for it in _load(s):
+            if it["done"]:
+                continue
+            m = s.get(Match, it["match_id"])
+            if m is None or m.status == "finished" or m.kickoff_utc > utcnow() - timedelta(hours=2.5) \
+                    or m.kickoff_utc < utcnow() - timedelta(days=3):
+                continue
+            need[m.id] = (it["match"], m.kickoff_utc.strftime("%d.%m.%Y"))
+    need = list(need.items())[:limit]
+    if not need:
+        return 0
+    client = client or scout.make_client()
+    if client is None:
+        return 0
+    filled = 0
+    for mid, (match, date) in need:
+        if runner.spent_today(engine) + 0.1 > runner.daily_budget():
+            break
+        try:
+            fs, cost = scout.final_score(client, match, date)
+        except Exception:  # noqa: BLE001
+            log.exception("Endstand nicht ermittelt: %s", match)
+            continue
+        runner.add_other_cost(engine, cost)
+        if not fs.found or fs.ft_home is None or fs.ft_away is None:
+            continue
+        with session_scope(engine) as s:
+            m = s.get(Match, mid)
+            m.ft_home, m.ft_away, m.status = fs.ft_home, fs.ft_away, "finished"
+            if fs.ht_home is not None and fs.ht_away is not None and fs.ht_home <= fs.ft_home \
+                    and fs.ht_away <= fs.ft_away:
+                m.ht_home, m.ht_away = fs.ht_home, fs.ht_away
+        filled += 1
+    return filled
+
+
+def stats(engine: Engine) -> dict:
+    """Für /diag: wie viele Tipps verfolgt, offen, abgerechnet, gemeldet."""
+    with session_scope(engine) as s:
+        items = _load(s)
+    return {"tracked": len(items), "open": sum(not i["done"] for i in items),
+            "done": sum(i["done"] for i in items), "reported": sum(bool(i.get("reported")) for i in items),
+            "batches": sorted({i.get("batch", "") for i in items})[-5:]}
 
 
 def settle(engine: Engine) -> list[dict]:

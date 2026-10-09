@@ -200,7 +200,9 @@ def test_only_europe(monkeypatch):
     assert region_ok("soccer_uefa_europa_league", "UEFA Europa League")
     assert region_ok("soccer_epl", "EPL") and region_ok("D1", None)
     assert region_ok("soccer_fifa_world_cup_qualifiers_europe", "FIFA World Cup Qualifiers - Europe")
-    for comp, name in (("soccer_japan_j_league", "J League"), ("soccer_brazil_campeonato", "Brazil Série A"),
+    assert region_ok("soccer_brazil_campeonato", "Brazil Série A")  # Brasilien auf Wunsch dabei
+    assert region_ok("soccer_brazil_serie_b", "Brazil Série B")
+    for comp, name in (("soccer_japan_j_league", "J League"),
                        ("soccer_argentina_primera_division", "Primera División - Argentina"),
                        ("soccer_usa_mls", "MLS"), ("soccer_fifa_world_cup_qualifiers_south_america", "WC Qual SA"),
                        ("soccer_international_friendlies", "International Friendlies"),

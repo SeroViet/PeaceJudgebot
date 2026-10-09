@@ -322,6 +322,41 @@ def halftime_score(client, match: str, date: str, final: str, model: str = MODEL
     return ht, cost
 
 
+class FinalScore(BaseModel):
+    found: bool = Field(description="True nur, wenn das Spiel beendet ist und der Endstand eindeutig in einer Quelle steht")
+    ft_home: int | None = Field(description="Endstand Tore Heimteam (nach 90 Min. + Nachspielzeit, ohne Verlängerung)")
+    ft_away: int | None = Field(description="Endstand Tore Gastteam")
+    ht_home: int | None = Field(description="Halbzeitstand Heimteam, falls bekannt")
+    ht_away: int | None = Field(description="Halbzeitstand Gastteam, falls bekannt")
+
+
+def final_score(client, match: str, date: str, model: str = MODEL) -> tuple[FinalScore, float]:
+    """Endstand (und Halbzeitstand) eines Spiels per Websuche nachschlagen – für die 🟢/🔴-Meldung,
+    wenn die Quoten-API keine Ergebnisse liefert (ca. 2–4 Rappen)."""
+    tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 2}]
+    messages = [{"role": "user", "content": f"Wie ist das Fussballspiel {match} am {date} ausgegangen? "
+                                            "Nenne Endstand und Halbzeitstand mit Quelle. Ist es noch nicht beendet, sag das."}]
+    cost, text = 0.0, ""
+    for _ in range(3):
+        resp = client.beta.messages.create(model=model, max_tokens=2000, tools=tools, messages=messages,
+                                           output_config={"effort": "low"}, betas=[FALLBACK_BETA], fallbacks="default")
+        cost += _cost(model, resp.usage, _count_searches(resp.content))
+        if resp.stop_reason == "pause_turn":
+            messages = [messages[0], {"role": "assistant", "content": resp.content}]
+            continue
+        text = "\n".join(b.text for b in resp.content if b.type == "text")
+        break
+    parsed = client.beta.messages.parse(
+        model=model, max_tokens=1000, output_format=FinalScore, output_config={"effort": "low"},
+        betas=[FALLBACK_BETA], fallbacks="default",
+        messages=[{"role": "user", "content": f"Spiel: {match} am {date}\nRecherche:\n{text}\n\n"
+                                              "Endstand und Halbzeitstand (Heim:Gast) eintragen; found=false, wenn "
+                                              "das Spiel nicht beendet oder der Endstand unklar ist."}])
+    cost += _cost(model, parsed.usage, 0)
+    return parsed.parsed_output or FinalScore(found=False, ft_home=None, ft_away=None, ht_home=None,
+                                              ht_away=None), cost
+
+
 def make_client():
     """Anthropic-Client oder None, wenn keine Zugangsdaten konfiguriert sind."""
     if not (os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")):

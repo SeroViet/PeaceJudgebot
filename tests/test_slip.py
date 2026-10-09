@@ -162,9 +162,14 @@ def test_bot_top_tips_tracked_per_day(engine, fixture_bytes, bundesliga):
             m.ft_home, m.ft_away = sc if sc else (None, None)
             m.ht_home, m.ht_away = (0, 1) if sc else (None, None)
         ids = (m1.id, m2.id)
-    tips = [{"match_id": ids[0], "match": "A – B", "kickoff": "2026-10-04T13:00:00", "label": "1. Halbzeit: X2",
+    from datetime import timedelta
+
+    from fussball.data.schema import utcnow
+
+    k1, k2 = (utcnow() - timedelta(hours=5)).isoformat(), (utcnow() - timedelta(hours=1)).isoformat()
+    tips = [{"match_id": ids[0], "match": "A – B", "kickoff": k1, "label": "1. Halbzeit: X2",
              "market": "H1_DC", "selection": "X2"},
-            {"match_id": ids[1], "match": "C – D", "kickoff": "2026-10-04T18:00:00", "label": "Über 1.5 Tore",
+            {"match_id": ids[1], "match": "C – D", "kickoff": k2, "label": "Über 1.5 Tore",
              "market": "OU1.5", "selection": "O"}]
     assert tracking.track_tips(engine, tips, "2026-10-04") == 2
     tracking.settle(engine)
@@ -206,3 +211,32 @@ def test_agent_fills_halftime_for_halftime_tips(engine, fixture_bytes, bundeslig
     assert tracking.fill_halftime(engine, client) == 1
     done = tracking.settle(engine)
     assert done[0]["won"] is True
+
+
+def test_results_filled_by_agent_when_api_has_none(engine, fixture_bytes, bundesliga, monkeypatch):
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from fussball import tracking
+    from fussball.agents import scout
+    from fussball.data import football_data as fd
+    from fussball.data.db import session_scope
+    from fussball.data.schema import Match, utcnow
+
+    with session_scope(engine) as s:
+        fd.import_season(s, bundesliga, "2627", fixture_bytes("D1_2627_sample.csv"))
+        m = s.scalars(select(Match)).first()
+        m.status, m.ft_home, m.ft_away, m.kickoff_utc = "scheduled", None, None, utcnow() - timedelta(hours=4)
+        mid = m.id
+    tracking.track_tips(engine, [{"match_id": mid, "match": "A – B", "kickoff": (utcnow() - timedelta(hours=4)).isoformat(),
+                                  "label": "Über 1.5 Tore", "market": "OU1.5", "selection": "O"}], "2026-10-09")
+    monkeypatch.setattr(scout, "final_score", lambda c, match, date: (scout.FinalScore(
+        found=True, ft_home=2, ft_away=1, ht_home=1, ht_away=0), 0.03))
+    assert tracking.fill_results(engine, client=SimpleNamespace()) == 1
+    done = tracking.settle(engine)
+    assert done[0]["won"] is True and done[0]["score"] == "2:1"
+    (title, items), = tracking.finished_batches(engine)
+    assert "🟢 <b>A – B</b>" in telegram_bot.format_results(items, title)
+    assert tracking.stats(engine)["reported"] == 1

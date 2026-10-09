@@ -304,7 +304,8 @@ def month_reserve_ok(remaining: int | None, cost: int = 2, today=None, per_day: 
 _PRIORITY = ("nations_league", "world_cup_qualifiers_europe", "euro_qual", "uefa_european", "fifa_world_cup",
              "champs_league", "europa_league", "conference_league", "epl", "germany_bundesliga", "spain_la_liga",
              "italy_serie_a", "france_ligue_one", "switzerland", "netherlands", "portugal", "austria", "efl_champ",
-             "bundesliga2", "belgium", "turkey", "spl", "denmark", "italy_serie_b", "spain_segunda", "ligue_two")
+             "brazil_campeonato", "bundesliga2", "belgium", "turkey", "spl", "denmark", "italy_serie_b",
+             "spain_segunda", "ligue_two", "brazil_serie_b")
 
 
 def _priority(sport: str) -> int:
@@ -338,6 +339,13 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
         upcoming = sorted(upcoming_counts(client, hours), key=lambda x: (_priority(x[0]), -x[2]))
         budget = min(budget, daily_allowance(client.remaining, st["spent"]))
         out["budget_today"] = budget
+        # Ergebnisse brauchen auch Credits (für die 🟢/🔴-Meldung): bis zu 2 Abfragen dafür freihalten
+        with session_scope(engine) as s:
+            due = s.execute(select(Competition.code).join(Match, Match.competition_id == Competition.id).where(
+                Match.status == "scheduled", Match.source == "odds-api",
+                Match.kickoff_utc < utcnow() - timedelta(hours=2.5),
+                Match.kickoff_utc > utcnow() - timedelta(days=3)).distinct()).scalars().all()
+        reserve += 2 * min(len(due), 2)
 
         def can_spend(limit: int) -> bool:
             return st["spent"] + 2 <= limit and (client.remaining is None or client.remaining >= 2)
@@ -358,11 +366,6 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
             st["spent"] += 2
             st["last"][sport] = utcnow().isoformat()
         # 2) Ergebnisse: offene Spiele (Quelle odds-api), deren Anpfiff > 2.5 h her ist
-        with session_scope(engine) as s:
-            due = s.execute(select(Competition.code).join(Match, Match.competition_id == Competition.id).where(
-                Match.status == "scheduled", Match.source == "odds-api",
-                Match.kickoff_utc < utcnow() - timedelta(hours=2.5),
-                Match.kickoff_utc > utcnow() - timedelta(days=3)).distinct()).scalars().all()
         for code in due:
             if not can_spend(budget):
                 break
@@ -580,15 +583,18 @@ _FRIENDLIES = ("friendl", "freundschaft", "testspiel", "club_friend")
 
 
 def region_ok(comp: str, comp_name: str | None = None) -> bool:
-    """Nur Europa (TIP_REGIONS=europa, Standard): europäische Ligen, Europapokal und europäische
-    Nationalteams (Nations League, EM/WM-Quali Europa). Keine Ligen aus Asien, Süd-/Nordamerika.
-    TIP_REGIONS=welt schaltet alles frei."""
+    """Europa + Brasilien (TIP_REGIONS=europa,brasilien, Standard): europäische Ligen, Europapokal,
+    europäische Nationalteams und die brasilianischen Ligen. Keine anderen Ligen aus Asien, Süd-/Nordamerika.
+    TIP_REGIONS=europa nur Europa, TIP_REGIONS=welt alles."""
     cat = category(comp, comp_name)
     text = f"{comp} {comp_name or ''}".lower().replace(" ", "_").replace("-", "_")
     if cat == "frauen" or any(w in text for w in _FRIENDLIES):  # nie Frauen, nie Testspiele
         return False
-    if os.getenv("TIP_REGIONS", "europa").lower() != "europa":
+    regions = os.getenv("TIP_REGIONS", "europa,brasilien").lower()
+    if "welt" in regions:
         return True
+    if "brasilien" in regions and "brazil" in text and cat != "national":
+        return True  # Brasilien Série A/B (auf Wunsch dazu)
     if cat not in EUROPE_CATS:
         return False
     return not (cat == "national" and any(w in text for w in _NON_EUROPE_NATIONAL))

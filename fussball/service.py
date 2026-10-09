@@ -304,7 +304,7 @@ def month_reserve_ok(remaining: int | None, cost: int = 2, today=None, per_day: 
 _PRIORITY = ("nations_league", "world_cup_qualifiers_europe", "euro_qual", "uefa_european", "fifa_world_cup",
              "champs_league", "europa_league", "conference_league", "epl", "germany_bundesliga", "spain_la_liga",
              "italy_serie_a", "france_ligue_one", "switzerland", "netherlands", "portugal", "austria", "efl_champ",
-             "brazil_campeonato", "bundesliga2", "belgium", "turkey", "spl", "denmark", "italy_serie_b",
+             "brazil_campeonato", "germany_bundesliga2", "belgium", "turkey", "spl", "denmark", "italy_serie_b",
              "spain_segunda", "ligue_two", "brazil_serie_b")
 
 

@@ -309,7 +309,9 @@ _PRIORITY = ("nations_league", "world_cup_qualifiers_europe", "euro_qual", "uefa
 
 
 def _priority(sport: str) -> int:
-    return next((i for i, w in enumerate(_PRIORITY) if w in sport), len(_PRIORITY))
+    """Rang in _PRIORITY; passen mehrere Einträge, zählt der genaueste ('bundesliga2' vor 'germany_bundesliga')."""
+    hits = [(len(w), i) for i, w in enumerate(_PRIORITY) if w in sport]
+    return max(hits)[1] if hits else len(_PRIORITY)
 
 
 def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] | None = None) -> dict:

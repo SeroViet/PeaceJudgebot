@@ -308,6 +308,7 @@ def test_scan_priority_big_competitions_first():
                     "soccer_switzerland_superleague", "soccer_uefa_champs_league"], key=_priority)
     assert order[:2] == ["soccer_uefa_nations_league", "soccer_uefa_champs_league"]
     assert order[-1] == "soccer_sweden_superettan"
+    assert _priority("soccer_spain_la_liga") < _priority("soccer_germany_bundesliga2")  # 2. Liga nicht vor La Liga
     assert region_ok("soccer_fa_cup", "FA Cup")
 
 

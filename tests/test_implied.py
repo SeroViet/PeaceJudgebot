@@ -339,3 +339,14 @@ def test_forecast_without_pinnacle_uses_bookmaker_consensus(engine):
     fs = market_forecasts(engine, hours=24)
     assert len(fs) == 1 and fs[0].reference == "Ø"
     assert 0.55 < fs[0].probs_1x2["H"] < 0.65 and fs[0].implied  # Spiel ohne Pinnacle trotzdem dabei
+
+
+def test_no_team_to_score_tips_anywhere():
+    """„Alavés trifft“ (Team über 0.5) darf nirgends vorkommen – auch nicht in /sicher oder der Tageskombi."""
+    from fussball.service import safe_tips
+
+    lam, mu = 1.3, 1.1
+    f = MatchForecast(1, "soccer_spain_la_liga", "La Liga", datetime(2026, 10, 10, 14, 0), "Alavés", "Getafe",
+                      lam, mu, {}, {}, {}, None, None, 0.0, {}, implied=implied_markets(lam, mu), implied_rates=(lam, mu))
+    labels = [t["label"] for t in safe_tips([f], 0.55, 0.95, per_match=5)]
+    assert labels and not any("trifft" in x or "0.5" in x for x in labels)

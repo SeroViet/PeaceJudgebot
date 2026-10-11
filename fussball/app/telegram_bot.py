@@ -627,6 +627,7 @@ COMMANDS = [
     ("ergebnisse", "Deine Tipps: 🟢 gewonnen / 🔴 verloren"),
     ("jetzt", "Agenten jetzt prüfen lassen und 6 Tipps schicken"),
     ("status", "Laufen die Agenten? Geprüft, gestrichen, Fehler"),
+    ("sag", "Nachricht an deine Freunde: /sag Hallo"),
     ("kosten", "Claude-Kosten heute"),
     ("sicher", "Tipps mit hoher Trefferquote"),
     ("heute", "Top-Tipps von heute (wie /top5)"),
@@ -790,6 +791,26 @@ def build(engine) -> Application | None:
         await reply(update, format_status(state.load_plan(), runner.spent_today(engine), runner.daily_budget(),
                                           runner.daily_done(engine), state.status().get("last_error")))
 
+    async def cmd_say(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """/sag Text: eine eigene Nachricht an alle Freunde (TELEGRAM_SHARE_IDS) schicken."""
+        text = " ".join(ctx.args or []).strip()
+        friends = [i for i in share_ids() if i != owner]
+        if not text:
+            await reply(update, "So geht's: <code>/sag Hey ciao Denise</code>")
+            return
+        if not friends:
+            await reply(update, "Noch keine Freunde eingetragen (Render → Environment → TELEGRAM_SHARE_IDS).")
+            return
+        ok = 0
+        for chat in friends:
+            try:
+                await ctx.bot.send_message(chat, f"💬 {html.escape(text)}", parse_mode=ParseMode.HTML)
+                ok += 1
+            except Exception:  # noqa: BLE001 – z. B. Freund hat den Bot noch nicht gestartet
+                log.exception("Nachricht an %s fehlgeschlagen", chat)
+        await reply(update, f"✅ Nachricht an {ok} von {len(friends)} Freund(en) geschickt."
+                    + ("" if ok == len(friends) else " Wer sie nicht bekam, muss den Bot zuerst mit /start öffnen."))
+
     async def cmd_now(update: Update, _ctx):
         """/jetzt: Agenten-Prüfung sofort starten und 6 Tipps schicken (Tageslimit gilt weiter)."""
         import asyncio
@@ -879,7 +900,7 @@ def build(engine) -> Application | None:
     app.add_handler(CommandHandler("start", cmd_start))
     for name, fn in (("heute", cmd_today), ("top5", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update),
-                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("boost", cmd_boost), ("torfest", cmd_torfest), ("kosten", cmd_costs), ("ergebnisse", cmd_results), ("status", cmd_status), ("jetzt", cmd_now)):
+                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("boost", cmd_boost), ("torfest", cmd_torfest), ("kosten", cmd_costs), ("ergebnisse", cmd_results), ("status", cmd_status), ("jetzt", cmd_now), ("sag", cmd_say)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     app.add_handler(MessageHandler((filters.PHOTO | filters.Document.IMAGE) & only_owner, on_photo))
     return app

@@ -81,7 +81,9 @@ class CryptoAgent:
         if coin:
             d = date.fromisoformat(coin["as_of"])
             if coin.get("name"):
-                res.facts.append(Fact(id="profile.name", label="Name", value=coin["name"], source=CG, as_of=d))
+                res.facts.append(
+                    Fact(id="profile.name", label="Name", value=coin["name"], source=CG, as_of=d)
+                )
             for fid, label, key, unit in [
                 ("price.last", "Kurs", "price_chf", "CHF"),
                 ("price.usd", "Kurs in USD", "price_usd", "USD"),

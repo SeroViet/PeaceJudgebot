@@ -77,9 +77,9 @@ class PerformanceTracker:
                 target = add_months(start, h)
                 if target > today:
                     continue
-                price_end = await self._price(r["subject"], target)
-                b0 = await self.ctx.market.close_on(BENCHMARK, start)
-                b1 = await self.ctx.market.close_on(BENCHMARK, target)
+                price_end = await self._price(r["subject"], target, r["currency"])
+                b0 = await self._benchmark(start, r["currency"])
+                b1 = await self._benchmark(target, r["currency"])
                 if price_end is None or not b0 or not b1 or not r["price"]:
                     continue
                 ev = Evaluation(r["id"], h, (price_end / r["price"] - 1) * 100, (b1 / b0 - 1) * 100)
@@ -92,11 +92,20 @@ class PerformanceTracker:
             await self.update_weights()
         return out
 
-    async def _price(self, subject: str, day: date) -> float | None:
-        crypto = self.ctx.cfg.crypto.allowlist.get(subject.upper())
-        if crypto:
-            return await self.ctx.market.close_on(f"{subject.upper()}-USD", day)
+    async def _price(self, subject: str, day: date, currency: str) -> float | None:
+        if subject.upper() in self.ctx.cfg.crypto.allowlist:
+            # Krypto-Empfehlungen werden in der Kurswährung der Meldung (CHF) erfasst
+            return await self.ctx.market.close_on(f"{subject.upper()}-{currency or 'CHF'}", day)
         return await self.ctx.market.close_on(subject, day)
+
+    async def _benchmark(self, day: date, currency: str) -> float | None:
+        """MSCI World (URTH, USD) in die Währung der Empfehlung umgerechnet – sonst verzerrt der Wechselkurs."""
+        b = await self.ctx.market.close_on(BENCHMARK, day)
+        ccy = "GBP" if currency in ("GBp", "GBX") else (currency or "USD")
+        if b is None or ccy == "USD":
+            return b
+        fx = await self.ctx.market.close_on(f"USD{ccy}=X", day)
+        return b * fx if fx else None
 
     async def update_weights(self) -> dict[str, float]:
         rows = await self.ctx.db.fetchall(

@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import logging
 import signal
+from datetime import timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -53,6 +54,20 @@ def schedule(scheduler: AsyncIOScheduler, jobs: Jobs, tz: str) -> None:
     add("flush", jobs.dispatcher.flush_pending, CronTrigger(minute="0,30", timezone=tz))
 
 
+async def bootstrap(ctx: Context, scheduler: AsyncIOScheduler, jobs: Jobs) -> None:
+    """Erster Start: Datenbank leer -> sofort eine Analyse-Runde, damit /top und /watchlist gefüllt sind."""
+    row = await ctx.db.fetchone("SELECT COUNT(*) AS n FROM analyses")
+    if row and row["n"] > 0:
+        return
+    log.info("Erster Start – Analyse-Runde und 13F-Abgleich in 1 Minute")
+
+    async def first_run() -> None:
+        await jobs.guarded("superinvestor", jobs.superinvestors)
+        await jobs.guarded("nightly", lambda: jobs.nightly_submit(include_universe=False))
+
+    scheduler.add_job(first_run, "date", run_date=ctx.now() + timedelta(minutes=1), id="bootstrap")
+
+
 async def run_bot(ctx: Context) -> None:
     s = ctx.settings
     ctx.flags.started_at = ctx.now().strftime("%d.%m.%Y %H:%M")
@@ -77,6 +92,7 @@ async def run_bot(ctx: Context) -> None:
     scheduler = AsyncIOScheduler(timezone=s.timezone)
     schedule(scheduler, jobs, s.timezone)
     scheduler.start()
+    await bootstrap(ctx, scheduler, jobs)
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

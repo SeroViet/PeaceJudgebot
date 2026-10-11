@@ -26,6 +26,8 @@ docker compose logs -f
 ```
 
 `./data` enthält die SQLite-Datenbank, `./config` ist eingebunden (Watchlist/Bestand ohne Neubau änderbar).
+Beim allerersten Start läuft nach 1 Minute automatisch eine Analyse-Runde (Bestand + Watchlist) und der
+13F-Abgleich, damit `/top` und `/watchlist` sofort Werte zeigen.
 
 ### Start lokal
 
@@ -136,3 +138,5 @@ Wachstum). Alles in `config/scoring.yaml` einstellbar.
 - **Swissquote** hat keine öffentliche API: ⚠️ heisst „Börse wird angeboten, Titel bitte prüfen“.
 - **Krypto-Unlocks/Hacks** nur über News (DefiLlama-Unlocks ist kostenpflichtig).
 - Die Bewertung ist ein Modell mit Annahmen, keine Wahrheit – deshalb Bär/Basis/Bulle.
+- Performance wird in der Währung der Empfehlung gegen den MSCI World (URTH, umgerechnet) gemessen,
+  ohne Dividenden.

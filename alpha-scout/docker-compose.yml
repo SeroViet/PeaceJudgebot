@@ -1,0 +1,10 @@
+services:
+  alpha-scout:
+    build: .
+    container_name: alpha-scout
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      # Watchlist/Bestand ohne Neubau anpassbar
+      - ./config:/app/config

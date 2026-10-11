@@ -1,0 +1,30 @@
+# Startgewichte (PerformanceTracker passt Agenten-Faktoren 0.5–1.5 an)
+weights:
+  quality: 30
+  valuation: 25
+  fundamental: 15
+  superinvestor: 10
+  insider: 10
+  news: 5
+  project: 5
+# Neutraler Wert, wenn ein Agent keine Aussage machen kann (z. B. Insider für Nicht-US)
+neutral_score: 50
+alert_new_chance_min: 80
+nachkauf_drop_pct: 20
+min_holding_days_for_sell: 183   # 6 Monate
+dedupe_days: 14
+valuation:
+  discount_rate: 0.09
+  safety_margin: 0.10   # Kaufzone: Kurs <= fairer Wert (Basis) * (1 - Marge)
+  exit_multiple: {bear: 15, base: 20, bull: 25}   # Kurs/FCF am Horizont
+  growth_cap: 0.25
+  terminal_fade: 0.5    # Wachstum halbiert sich in Jahren 6–10
+portfolio:
+  core_target_pct: 60
+  quality_max_pct: 30
+  rest_max_pct: 10
+  single_stock_max_pct: 5
+  sector_max_pct_of_stocks: 40
+  tranche_pct: 1.0      # Standard-Tranche in % des Depots
+  veto_countries: [Russia, Belarus, Iran, North Korea]
+  watch_countries: [China, Taiwan, Israel, Turkey]

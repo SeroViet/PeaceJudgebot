@@ -1,0 +1,30 @@
+# ProjectScout: Stichworte je Thema und mögliche börsennotierte Profiteure (Kandidaten,
+# keine Empfehlung). Zuschläge an genannte Firmen werden zusätzlich per Namensabgleich erkannt.
+themes:
+  stromnetz:
+    keywords: [transmission, substation, grid, high-voltage, hvdc, transformer, "power line", stromnetz, umspannwerk]
+    candidates: [ETN, PWR, ABBN.SW, SIE.DE, SU.PA, HUBB]
+  rechenzentren:
+    keywords: ["data center", "data centre", datacenter, rechenzentrum, "ai gigafactory", hpc, supercomputer]
+    candidates: [NVDA, VRT, ETN, EQIX, DLR, SU.PA, ANET]
+  pipelines:
+    keywords: ["gas pipeline", "oil pipeline", lng, "gas transmission", "compressor station", hydrogen pipeline]
+    candidates: [WMB, KMI, ENB, TRP]
+  halbleiter:
+    keywords: [semiconductor, fab, wafer, lithography, halbleiter, "chips act"]
+    candidates: [TSM, ASML, AMAT, LRCX, KLAC, 8035.T]
+  ruestung:
+    keywords: [missile, munition, ammunition, drone, uav, "air defense", fighter, rüstung, armored, "counter-uas"]
+    candidates: [LMT, RTX, NOC, GD, KTOS, AVAV, RHM.DE, R3NK.DE, SAAB-B.ST, BA.L, HO.PA]
+min_award_usd: 100000000
+# Auftragnehmer-Name -> Ticker (ergänzt den automatischen Abgleich mit SEC-Firmenliste)
+contractor_aliases:
+  "LOCKHEED MARTIN": LMT
+  "RAYTHEON": RTX
+  "NORTHROP GRUMMAN": NOC
+  "GENERAL DYNAMICS": GD
+  "BOEING": BA
+  "KRATOS": KTOS
+  "AEROVIRONMENT": AVAV
+  "QUANTA SERVICES": PWR
+  "OPTUM": UNH

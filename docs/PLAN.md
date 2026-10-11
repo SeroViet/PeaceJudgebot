@@ -1,6 +1,6 @@
 # ALPHA SCOUT – Phase 0: Plan
 
-Stand: 2026-10-11 · Status: **wartet auf OK**
+Stand: 2026-10-11 · Status: **freigegeben, Phasen 1–4 umgesetzt** (Code in `alpha-scout/`)
 
 > Hinweis: Alpha Scout ist ein Recherche-Werkzeug, keine Anlageberatung. Jede
 > Meldung nennt Quellen und Unsicherheiten; die Kaufentscheidung bleibt bei dir.
@@ -205,18 +205,12 @@ pro Mio. Tokens (Input/Output). Batch API −50 %, Cache-Reads ≈ 10 % des Inpu
 
 ---
 
-## 10. Offene Punkte (brauche deine Antwort)
+## 10. Entscheidungen (offene Punkte geklärt)
 
-1. **Bybit-Bot:** Der Pfad ist noch der Platzhalter `<PFAD-ZUM-BYBIT-BOT>` und der Bot liegt
-   nicht in dieser Umgebung. Nenne mir das GitHub-Repo (owner/name), dann binde ich es
-   nur lesend ein. Alternativ schreibe ich Telegram- und GDELT-Modul neu. Die
-   `TELEGRAM_CHAT_ID` trägst du dann selbst in `.env` ein.
-2. **Alter Code im Repo** (`main.py`, `render.yaml`, `build.sh`, PeaceJudgeBot):
-   Vorschlag – entfernen (bleibt in der Git-Historie).
-3. **Hosting:** Der Bot muss 24/7 laufen (Scheduler). Render-Free schläft ein und ist
-   ungeeignet. Vorschlag: Docker auf kleinem VPS (z. B. Hetzner/Infomaniak, ~CHF 5/Monat)
-   oder Raspberry Pi/NAS zu Hause.
-4. **Watchlist-Details:** „Gold“ → physisch hinterlegter Gold-ETC/ETF in CHF
-   (z. B. ZKB Gold ETF) ok? `R3NK` = RENK Group (Xetra) – richtig?
-5. **Depot:** Basiswährung CHF? Und hast du schon Positionen für `holdings.yaml`
-   (Ticker, Stückzahl, Kaufdatum, Kaufkurs, Kaufgrund)?
+1. **Bybit-Bot:** nicht verfügbar → Telegram- und GDELT-Modul neu geschrieben. `TELEGRAM_CHAT_ID` in `.env` eintragen.
+2. **Bestehender Code** (`main.py`, KI-Wette auf eigenem Branch) bleibt unangetastet. Alpha Scout liegt komplett in `alpha-scout/`.
+3. **Hosting:** Docker (`alpha-scout/docker-compose.yml`) auf VPS oder Heimserver.
+4. **Watchlist:** `Gold` → Swisscanto (CH) Gold ETF (`ZGLD.SW`), `R3NK` → RENK Group (`R3NK.DE`).
+5. **Depot:** Basiswährung CHF, `holdings.yaml` startet leer (`/buy` oder Datei pflegen).
+
+Details zu Betrieb, Befehlen und Grenzen: `alpha-scout/README.md`.

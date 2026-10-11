@@ -1,0 +1,22 @@
+<informationTable xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable">
+  <infoTable>
+    <nameOfIssuer>ALPHA INC</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>000000AAA</cusip>
+    <value>600000000</value><shrsOrPrnAmt><sshPrnamt>1000000</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>
+    <investmentDiscretion>SOLE</investmentDiscretion>
+  </infoTable>
+  <infoTable>
+    <nameOfIssuer>ALPHA INC</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>000000AAA</cusip>
+    <value>200000000</value><shrsOrPrnAmt><sshPrnamt>400000</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>
+    <investmentDiscretion>DFND</investmentDiscretion>
+  </infoTable>
+  <infoTable>
+    <nameOfIssuer>BETA CORP</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>000000BBB</cusip>
+    <value>200000000</value><shrsOrPrnAmt><sshPrnamt>50000</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>
+    <investmentDiscretion>SOLE</investmentDiscretion>
+  </infoTable>
+  <infoTable>
+    <nameOfIssuer>BETA CORP</nameOfIssuer><titleOfClass>CALL</titleOfClass><cusip>000000BBB</cusip>
+    <value>999</value><shrsOrPrnAmt><sshPrnamt>1</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>
+    <putCall>Call</putCall><investmentDiscretion>SOLE</investmentDiscretion>
+  </infoTable>
+</informationTable>

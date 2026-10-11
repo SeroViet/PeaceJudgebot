@@ -1,0 +1,30 @@
+# Von dir bei Swissquote bestätigte Titel -> Status ✅.
+# Alles andere wird über die Börsenregel als "⚠️ wahrscheinlich handelbar" markiert.
+confirmed: []
+# Krypto, die Swissquote im Krypto-Handel anbietet (bitte bei Bedarf prüfen/ergänzen)
+crypto_confirmed: []
+# Börsen (Yahoo-Suffix), die Swissquote laut eigener Angabe anbietet -> ⚠️ wahrscheinlich
+exchanges:
+  "": US (NYSE/Nasdaq)
+  .SW: SIX Swiss Exchange
+  .DE: Xetra
+  .F: Frankfurt
+  .L: London Stock Exchange
+  .PA: Euronext Paris
+  .AS: Euronext Amsterdam
+  .BR: Euronext Brüssel
+  .LS: Euronext Lissabon
+  .MI: Borsa Italiana
+  .MC: Bolsa de Madrid
+  .ST: Nasdaq Stockholm
+  .CO: Nasdaq Kopenhagen
+  .HE: Nasdaq Helsinki
+  .OL: Oslo Børs
+  .VI: Wiener Börse
+  .T: Tokyo Stock Exchange
+  .HK: Hong Kong Exchange
+  .SI: Singapore Exchange
+  .AX: ASX
+  .TO: Toronto Stock Exchange
+# US-OTC/Pink-Sheets sind ausgeschlossen
+excluded_us_exchanges: [PNK, OQB, OQX, OTC]

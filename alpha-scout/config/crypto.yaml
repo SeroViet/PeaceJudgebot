@@ -1,0 +1,10 @@
+# Krypto: nur Coins mit realer Nutzung, Gebühren-Einnahmen und >= 3 Jahren Historie.
+allowlist:
+  BTC: {coingecko: bitcoin, defillama_fees: null}   # BTC: Gebühren über Miner, nicht in DefiLlama-Fees
+  ETH: {coingecko: ethereum, defillama_fees: ethereum}
+  SOL: {coingecko: solana, defillama_fees: solana}
+# Weitere Kandidaten, die maschinell geprüft werden (nie automatisch Kauf, höchstens "beobachten")
+candidates: {}
+min_history_years: 3
+min_fees_30d_usd: 1000000
+memecoin_blocklist: [DOGE, SHIB, PEPE, BONK, WIF, FLOKI]

@@ -1,0 +1,13 @@
+# Dein Bestand. Pflege per Telegram (/buy, /sell) oder direkt hier.
+# bucket: kern (MSCI-World-ETF) | qualitaet (Einzelaktien) | rest (Krypto, Themen, Spekulation)
+# Beispiel:
+# positions:
+#   - ticker: MSFT
+#     shares: 10
+#     buy_price: 410.50
+#     currency: USD
+#     buy_date: 2026-03-15
+#     bucket: qualitaet
+#     thesis: "Cloud + KI-Marktführer, Netzwerkeffekte in Office/Azure"
+positions: []
+cash_chf: 0

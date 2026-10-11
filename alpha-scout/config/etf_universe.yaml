@@ -1,0 +1,26 @@
+# Kandidaten je Kategorie. TER/Grösse werden live abgefragt. Domizil nur eintragen, wenn sicher.
+categories:
+  msci_world:
+    label: "MSCI World (Kern)"
+    candidates:
+      - {ticker: WRDUSW.SW, domicile: IE}
+      - {ticker: SWDA.SW, domicile: IE}
+      - {ticker: MWRD.SW}
+      - {ticker: XDWD.DE, domicile: IE}
+  schweiz:
+    label: "Schweiz (SPI)"
+    candidates:
+      - {ticker: CHSPI.SW, domicile: CH}
+      - {ticker: SPICHA.SW}
+  schwellenlaender:
+    label: "Schwellenländer"
+    candidates:
+      - {ticker: EIMI.SW, domicile: IE}
+  usa:
+    label: "USA (S&P 500)"
+    candidates:
+      - {ticker: CSSPX.SW, domicile: IE}
+  gold:
+    label: "Gold (physisch)"
+    candidates:
+      - {ticker: ZGLD.SW, domicile: CH}

@@ -1,0 +1,14 @@
+# Nachrichtenquellen
+rss:
+  - {name: "Fed", url: "https://www.federalreserve.gov/feeds/press_all.xml"}
+  - {name: "EZB", url: "https://www.ecb.europa.eu/rss/press.html"}
+  - {name: "SNB", url: "https://www.snb.ch/public/en/rss/pressrel"}
+  - {name: "BoJ", url: "https://www.boj.or.jp/en/rss/whatsnew.xml"}
+  - {name: "SEC Press", url: "https://www.sec.gov/news/pressreleases.rss"}
+  - {name: "SEC Litigation", url: "https://www.sec.gov/enforcement-litigation/litigation-releases/rss"}
+# GDELT-Abfragen (zusätzlich zu Watchlist/Bestand, die automatisch ergänzt werden)
+gdelt_macro:
+  - '("federal reserve" OR "ecb" OR "swiss national bank" OR "bank of japan") (rate OR inflation)'
+  - '(tariff OR sanctions OR "export controls") (semiconductor OR chips OR china)'
+min_importance: 70
+fraud_keywords: [fraud, "sec investigation", subpoena, "accounting irregularities", "short seller report", restatement, "wells notice"]

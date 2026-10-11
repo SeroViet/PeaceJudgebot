@@ -1,0 +1,13 @@
+# Watchlist – wird laufend geprüft. Tickers im Yahoo-Format (Suffix = Börse, z. B. .SW = SIX).
+qualitaet:   [MSFT, AMZN, GOOGL, NVDA, TSM, V]
+klein:       [META, XYL, Gold]
+ruestung:    [KTOS, AVAV]
+kaufstopp:   {R3NK: "bis Q3-Bericht 05.11.2026"}
+beobachten:  [ONDS, RCAT]
+krypto:      [BTC, ETH, SOL]
+etf_kern:    MSCI World UCITS (CH- oder IE-Domizil)
+
+# Kurznamen -> Yahoo-Ticker
+aliases:
+  Gold: ZGLD.SW      # Swisscanto (CH) Gold ETF EA CHF, physisch hinterlegt
+  R3NK: R3NK.DE      # RENK Group AG, Xetra

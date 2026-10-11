@@ -1,0 +1,21 @@
+# Top-Investoren (SEC CIK, geprüft gegen data.sec.gov am 2026-10-11)
+investors:
+  - {name: "Berkshire Hathaway (Buffett)", cik: "0001067983"}
+  - {name: "Pershing Square (Ackman)", cik: "0001336528"}
+  - {name: "Appaloosa (Tepper)", cik: "0001656456"}
+  - {name: "Tiger Global", cik: "0001167483"}
+  - {name: "Third Point (Loeb)", cik: "0001040273"}
+  - {name: "Baupost (Klarman)", cik: "0001061768"}
+  - {name: "TCI (Hohn)", cik: "0001647251"}
+  - {name: "Gates Foundation Trust", cik: "0001166559"}
+  - {name: "Akre Capital", cik: "0001112520"}
+  - {name: "Fundsmith (Smith)", cik: "0001569205"}
+  - {name: "Duquesne Family Office (Druckenmiller)", cik: "0001536411"}
+  - {name: "Lone Pine Capital", cik: "0001061165"}
+  - {name: "Viking Global", cik: "0001103804"}
+  - {name: "Polen Capital", cik: "0001034524"}
+# Schwellen
+big_new_position_pct: 3.0     # neue Position >= 3 % des 13F-Portfolios
+big_increase_pct: 50.0        # Aufstockung >= 50 % ...
+big_increase_min_weight: 1.0  # ... bei Positionsgewicht >= 1 %
+cluster_min_investors: 3      # Kaufcluster

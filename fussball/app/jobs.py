@@ -180,7 +180,7 @@ async def _refresh_loop(engine):
             for c in info.get("combo_results", []) if os.getenv("DAILY_FULL", "0") == "1" else []:
                 await telegram_bot.notify(_bot, telegram_bot.format_combo_result(c))  # nur wenn Kombis verschickt
             for title, items in info.get("tracked_results", []):
-                await telegram_bot.notify(_bot, telegram_bot.format_results(items, title))
+                await telegram_bot.notify(_bot, telegram_bot.format_results(items, title), share=True)
             # Nur die Spiele: Hat der Scout Spiele der heutigen Kombi ersetzt, neue Kombi senden
             if not first and any(a.get("removed") and not a.get("cached") for a in info.get("agent", [])):
                 await telegram_bot.notify(_bot, "🔁 <b>Tageskombi angepasst</b> (Scout hat Spiele ersetzt)\n\n"
@@ -261,14 +261,14 @@ async def _run_daily_locked(engine, loop) -> None:
     boost = telegram_bot.format_boost(plan) if os.getenv("DAILY_BOOST", "1") == "1" else ""
     sent = False
     if boost:  # Hauptnachricht: die Boost-Kombi
-        await telegram_bot.notify(_bot, boost)
+        await telegram_bot.notify(_bot, boost, share=True)
         _track_boost(engine, plan)
         sent = True
     if safe_on() or not boost:  # sichere Tipps nur auf Wunsch – oder als Ersatz, wenn heute keine Boost-Kombi geht
         if not boost:
-            await telegram_bot.notify(_bot, "ℹ️ Heute ist keine Boost-Kombi möglich (zu wenige Tipps ab Quote 1.50) "
+            await telegram_bot.notify(_bot, "ℹ️ Heute ist keine Boost-Kombi möglich (zu wenige Tipps ab Quote 1.40) "
                                       "– hier die sicheren Tipps:")
-        await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
+        await telegram_bot.notify(_bot, telegram_bot.format_top5(plan), share=True)
         _track_top(engine, plan)
         sent = sent or bool(telegram_bot.top_tips(plan))
     errs = [t for t in plan.get("top") or [] if t.get("agent") == "fehler"]
@@ -348,6 +348,10 @@ def due_lineup_checks(plan: dict, now: datetime, minutes: int, already: set[str]
     for t in plan.get("top") or []:  # nur die von beiden Agenten bestätigten sicheren Tipps
         if t.get("agent") == "bestätigt":
             legs.setdefault(t["match_id"], t)
+    for c in plan.get("boost_combos") or []:  # und die Spiele der Boost-Kombi
+        for leg in c["legs"]:
+            if (leg.get("agent") or {}).get("assessment") == "bestätigt":
+                legs.setdefault(leg["match_id"], leg)
     out = []
     for mid, leg in legs.items():
         kickoff = datetime.fromisoformat(leg["kickoff"])
@@ -387,7 +391,7 @@ async def _reminder_loop(engine=None):
                         engine, [leg], max_age_h=0.3, local_time=state.local, max_searches=4))
                     text = lineup_alert(leg, res[0]) if res else None
                     if text:
-                        await telegram_bot.notify(_bot, text)
+                        await telegram_bot.notify(_bot, text, share=True)
         except Exception:  # noqa: BLE001
             log.exception("Erinnerung/Aufstellungs-Check fehlgeschlagen")
         await asyncio.sleep(300)

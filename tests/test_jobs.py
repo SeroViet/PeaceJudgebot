@@ -236,7 +236,7 @@ def test_run_daily_now_sends_tips(engine, monkeypatch):
 
     sent = []
 
-    async def notify(_bot, text):
+    async def notify(_bot, text, **_kw):
         sent.append(text)
 
     monkeypatch.setattr(telegram_bot, "notify", notify)
@@ -262,7 +262,7 @@ def test_daily_sends_only_boost_by_default(engine, monkeypatch):
     plan = {"top": [], "boost_combos": [{"day": day, "cat": "liga_eu", "legs": [leg], "prob": 0.6, "boost": True}]}
     sent = []
 
-    async def notify(_bot, text):
+    async def notify(_bot, text, **_kw):
         sent.append(text)
 
     monkeypatch.setattr(telegram_bot, "notify", notify)
@@ -302,3 +302,22 @@ def test_boost_combo_always_exists_mixed_leagues():
     assert service.boost_fallback(fs, [], bc, now=late) == []
     text = telegram_bot.format_boost({"boost_combos": [{**combo, "day": "2099-01-01"}]})
     assert "Boost-Kombi für 01.01." in text and "Alle Ligen" in text
+
+
+def test_friends_get_tips_but_not_system_messages(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("TELEGRAM_OWNER_ID", "1")
+    monkeypatch.setenv("TELEGRAM_SHARE_IDS", "2, 3")
+    sent = []
+
+    async def send_message(chat, text, **kw):
+        sent.append(chat)
+
+    app = SimpleNamespace(bot=SimpleNamespace(send_message=send_message))
+    asyncio.run(telegram_bot.notify(app, "🚀 Boost-Kombi", share=True))
+    assert sent == [1, 2, 3]
+    sent.clear()
+    asyncio.run(telegram_bot.notify(app, "⚠️ Systemfehler"))
+    assert sent == [1]  # Systemmeldungen nur an den Besitzer

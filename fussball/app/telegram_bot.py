@@ -663,7 +663,17 @@ def build(engine) -> Application | None:
             "Als TELEGRAM_OWNER_ID eintragen, damit der Bot nur dir antwortet.")
 
     async def cmd_start(update: Update, _ctx):
-        if owner is None or update.effective_user.id != owner:
+        if update.effective_user.id in share_ids() and update.effective_user.id != owner:
+            await update.effective_message.reply_text(
+                "👋 Willkommen! Du bekommst hier jeden Tag die Tipps von PeaceJudge und nach den Spielen "
+                "die Ergebnisse (🟢 gewonnen / 🔴 verloren).")
+            return
+        if owner is not None and update.effective_user.id != owner:
+            await update.effective_message.reply_text(
+                f"👋 Deine Telegram-ID: {update.effective_user.id}\n"
+                "Schick diese Nummer dem Besitzer des Bots – dann bekommst du die Tipps auch.")
+            return
+        if owner is None:
             await update.effective_message.reply_text(
                 f"👋 Deine Telegram-ID: {update.effective_user.id}\n"
                 "Trage sie beim Server als TELEGRAM_OWNER_ID ein und starte den Dienst neu. "
@@ -891,12 +901,21 @@ def chunks(text: str, limit: int = 3900) -> list[str]:
     return out
 
 
-async def notify(app: Application | None, text: str) -> None:
+def share_ids() -> list[int]:
+    """Freunde, die die Tipps und Ergebnisse mitlesen (TELEGRAM_SHARE_IDS, durch Komma getrennt).
+    Sie bekommen nur Tipps/Ergebnisse – keine Systemmeldungen, und Befehle beantwortet der Bot nur dem Besitzer."""
+    return [int(x) for x in os.getenv("TELEGRAM_SHARE_IDS", "").replace(";", ",").split(",")
+            if x.strip().lstrip("-").isdigit()]
+
+
+async def notify(app: Application | None, text: str, share: bool = False) -> None:
     owner = owner_id()
     if app is None or owner is None or not text:
         return
-    try:
-        for chunk in chunks(text):
-            await app.bot.send_message(owner, chunk, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
-    except Exception:  # noqa: BLE001
-        log.exception("Telegram-Nachricht fehlgeschlagen")
+    targets = [owner] + ([i for i in share_ids() if i != owner] if share else [])
+    for chat in targets:
+        try:
+            for chunk in chunks(text):
+                await app.bot.send_message(chat, chunk, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        except Exception:  # noqa: BLE001 – ein Empfänger darf die anderen nicht blockieren
+            log.exception("Telegram-Nachricht an %s fehlgeschlagen", chat)

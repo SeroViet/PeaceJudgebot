@@ -9,9 +9,10 @@ COPY pyproject.toml ./
 COPY alpha_scout ./alpha_scout
 RUN pip install .
 
+# Vorlage für die Konfiguration. Auf Render/Docker mit Disk: CONFIG_DIR=/app/data/config setzen,
+# dann werden fehlende Dateien beim Start dorthin kopiert und bleiben bei Neustarts erhalten.
 COPY config ./config
-RUN useradd --create-home scout && mkdir -p /app/data && chown -R scout /app
-USER scout
+RUN mkdir -p /app/data
 
 VOLUME ["/app/data"]
 CMD ["python", "-m", "alpha_scout"]

@@ -98,3 +98,19 @@ def test_secret_masking():
     assert "***" in f.mask("key=supersecret123")
     assert "sk-ant-" not in f.mask("sk-ant-api03-abcdef")
     assert "***" in f.mask("https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/send")
+
+
+def test_seed_config_copies_missing_only(tmp_path):
+    from alpha_scout.config import seed_config
+
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    (seed / "watchlist.yaml").write_text("qualitaet: [MSFT]\n")
+    (seed / "holdings.yaml").write_text("positions: []\n")
+    target = tmp_path / "disk" / "config"
+    target.mkdir(parents=True)
+    (target / "holdings.yaml").write_text("positions: [eigene]\n")
+    assert seed_config(target, seed) == ["watchlist.yaml"]
+    assert (target / "holdings.yaml").read_text() == "positions: [eigene]\n"
+    assert seed_config(target, seed) == []
+    assert seed_config(seed, seed) == []

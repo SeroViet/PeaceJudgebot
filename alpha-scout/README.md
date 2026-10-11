@@ -17,7 +17,11 @@ Qualitätsanlagen, prüft sie mit 14 Agenten und meldet sich per Telegram (@scou
 2. `config/holdings.yaml` mit deinem Bestand füllen (oder später per `/buy`).
 3. In `config/swissquote_universe.yaml` Titel eintragen, die du bei Swissquote geprüft hast → ✅ statt ⚠️.
 
-### Start mit Docker (empfohlen, läuft 24/7)
+### Start auf Render (wie der Fussball-Bot)
+
+Schritt-für-Schritt-Anleitung: [DEPLOY.md](DEPLOY.md) – eigener Background Worker mit Disk.
+
+### Start mit Docker (eigener Server)
 
 ```bash
 cd alpha-scout

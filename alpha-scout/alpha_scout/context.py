@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from alpha_scout.config import AppConfig, RuntimeFlags, Settings
+from alpha_scout.config import AppConfig, RuntimeFlags, Settings, seed_config
 from alpha_scout.data.crypto_sources import CoinGecko, DefiLlama
 from alpha_scout.data.market import MarketData
 from alpha_scout.data.news_sources import Gdelt, RssReader
@@ -50,6 +50,7 @@ class Context:
 
 
 async def build_context(settings: Settings) -> Context:
+    seed_config(settings.config_dir, settings.config_seed_dir)
     db = Database(settings.db_path)
     await db.connect()
     ua = settings.sec_edgar_user_agent or "AlphaScout (bitte SEC_EDGAR_USER_AGENT setzen)"

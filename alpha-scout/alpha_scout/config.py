@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     db_path: Path = Path("data/alpha_scout.db")
     config_dir: Path = Path("config")
+    config_seed_dir: Path = Path("config")  # Vorlage, aus der fehlende Dateien kopiert werden
 
     model_filter: str = "claude-haiku-5-5"
     model_analysis: str = "claude-sonnet-5-5"
@@ -226,6 +227,23 @@ class Universe(BaseModel):
 
     def all(self) -> list[str]:
         return list(dict.fromkeys(t for group in self.tickers.values() for t in group))
+
+
+def seed_config(target: Path, seed: Path) -> list[str]:
+    """Fehlende YAML-Dateien aus der mitgelieferten Vorlage kopieren (z. B. beim ersten Start auf einer Disk).
+
+    Bestehende Dateien werden nie überschrieben – dein Bestand und deine Watchlist bleiben erhalten.
+    """
+    if target.resolve() == seed.resolve() or not seed.is_dir():
+        return []
+    target.mkdir(parents=True, exist_ok=True)
+    copied = []
+    for src in sorted(seed.glob("*.yaml")):
+        dst = target / src.name
+        if not dst.exists():
+            dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+            copied.append(src.name)
+    return copied
 
 
 class AppConfig:

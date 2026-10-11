@@ -612,6 +612,7 @@ def format_stats(engine) -> str:
 
 
 COMMANDS = [
+    ("boost", "Boost-Kombi von heute (jeder Tipp ab 1.50, KombiBoost)"),
     ("top5", "Die 5–6 sichersten Tipps von heute, vom Scout geprüft"),
     ("tageskombi", "Sichere 3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("ergebnisse", "Deine Tipps: 🟢 gewonnen / 🔴 verloren"),

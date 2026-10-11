@@ -107,10 +107,10 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
             info["agent"] = service.apply_agents(engine, plan, cached_only=not day_scope)
         except Exception:  # noqa: BLE001 – ohne Agenten weiterarbeiten
             log.exception("Agenten fehlgeschlagen")
-        # Die 6 Tipps des Tages (/top5) IMMER zuerst prüfen – sie bekommen das Budget, egal was in
-        # AGENT_COMBOS steht; ohne Agentenlauf die letzten Urteile übernehmen (kostenlos)
+        # Die 6 sicheren Tipps (/top5) zuerst prüfen – nur wenn sie täglich verschickt werden (DAILY_SAFE=1);
+        # sonst geht das Budget in die Boost-Kombi. Ohne Agentenlauf die letzten Urteile übernehmen (kostenlos)
         try:
-            if agents:
+            if agents and os.getenv("DAILY_SAFE", "0") == "1":
                 info["agent"] += service.apply_agents_top(engine, plan)
             else:
                 service.carry_top_agents(plan, old.get("top", []))

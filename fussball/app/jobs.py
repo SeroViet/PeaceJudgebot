@@ -240,9 +240,14 @@ async def _run_daily(engine, loop) -> None:
         await _run_daily_locked(engine, loop)
 
 
+def safe_on() -> bool:
+    """Sichere Tipps (6 Stück) zusätzlich schicken? Standard aus: nur die Boost-Kombi (DAILY_SAFE=1 schaltet ein)."""
+    return os.getenv("DAILY_SAFE", "0") == "1"
+
+
 async def _run_daily_locked(engine, loop) -> None:
     await telegram_bot.notify(_bot, "🔎 <b>Agenten prüfen jetzt die heutigen Spiele</b> (mehrere gleichzeitig) – "
-                              "die sicheren Tipps kommen in ca. 10–20 Minuten.")
+                              "die Tipps kommen in ca. 10–20 Minuten.")
     info: dict = {}
     for _ in range(40 if engine is not None else 0):  # läuft gerade ein Refresh: kurz warten (max. 20 Min.)
         info = await loop.run_in_executor(None, lambda: state.refresh(
@@ -251,21 +256,28 @@ async def _run_daily_locked(engine, loop) -> None:
             break
         await asyncio.sleep(30)
     plan = state.load_plan()
-    await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
     boost = telegram_bot.format_boost(plan) if os.getenv("DAILY_BOOST", "1") == "1" else ""
-    if boost:  # 2. Nachricht: die mutige Boost-Kombi
+    sent = False
+    if boost:  # Hauptnachricht: die Boost-Kombi
         await telegram_bot.notify(_bot, boost)
         _track_boost(engine, plan)
+        sent = True
+    if safe_on() or not boost:  # sichere Tipps nur auf Wunsch – oder als Ersatz, wenn heute keine Boost-Kombi geht
+        if not boost:
+            await telegram_bot.notify(_bot, "ℹ️ Heute ist keine Boost-Kombi möglich (zu wenige Tipps ab Quote 1.50) "
+                                      "– hier die sicheren Tipps:")
+        await telegram_bot.notify(_bot, telegram_bot.format_top5(plan))
+        _track_top(engine, plan)
+        sent = sent or bool(telegram_bot.top_tips(plan))
     errs = [t for t in plan.get("top") or [] if t.get("agent") == "fehler"]
     if errs:  # Fehler nie verschweigen
         await telegram_bot.notify(_bot, f"⚠️ <b>Agenten-Fehler bei {len(errs)} Spiel(en)</b>\n"
                                   f"{html.escape(errs[0].get('reason', ''))[:200]}\nDetails: /status")
-    if engine is not None and telegram_bot.top_tips(plan):
+    if engine is not None and sent:
         # nur als erledigt merken, wenn wirklich Tipps kamen – sonst holt ein Neustart die Prüfung nach
         from fussball.agents import runner
 
         runner.mark_daily_done(engine)
-    _track_top(engine, plan)
 
 
 async def _daily_loop(engine=None):

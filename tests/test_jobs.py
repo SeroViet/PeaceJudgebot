@@ -243,6 +243,34 @@ def test_run_daily_now_sends_tips(engine, monkeypatch):
     monkeypatch.setattr(state, "refresh", lambda engine, days=3, agents=False: {"agent": []})
     monkeypatch.setattr(state, "load_plan", lambda: {"top": []})
     asyncio.run(jobs.run_daily_now(engine))
-    assert "Agenten prüfen jetzt" in sent[0] and "Heute keine Tipps" in sent[1]
+    assert "Agenten prüfen jetzt" in sent[0] and "keine Boost-Kombi" in sent[1] and "Heute keine Tipps" in sent[2]
     assert not runner.daily_done(engine)  # keine Tipps → nicht erledigt, ein Neustart versucht es nochmals
     assert not jobs.daily_running()
+
+
+def test_daily_sends_only_boost_by_default(engine, monkeypatch):
+    import asyncio
+    from datetime import datetime, timedelta
+
+    from fussball.app import jobs, state
+
+    day = datetime.now(state.TZ).date().isoformat()
+    kick = (datetime.now(state.TZ) + timedelta(hours=1)).astimezone(
+        __import__("zoneinfo").ZoneInfo("UTC")).replace(tzinfo=None).isoformat()
+    leg = {"match_id": 1, "match": "A – B", "kickoff": kick, "label": "Über 2.5 Tore", "market": "OU2.5",
+           "selection": "O", "prob": 0.6, "agent": {"assessment": "bestätigt", "reason": ""}}
+    plan = {"top": [], "boost_combos": [{"day": day, "cat": "liga_eu", "legs": [leg], "prob": 0.6, "boost": True}]}
+    sent = []
+
+    async def notify(_bot, text):
+        sent.append(text)
+
+    monkeypatch.setattr(telegram_bot, "notify", notify)
+    monkeypatch.setattr(state, "refresh", lambda engine, days=3, agents=False: {"agent": []})
+    monkeypatch.setattr(state, "load_plan", lambda: plan)
+    asyncio.run(jobs.run_daily_now(engine))
+    assert len(sent) == 2 and "Boost-Kombi heute" in sent[1]  # nur Start + Boost, keine sicheren Tipps
+    monkeypatch.setenv("DAILY_SAFE", "1")
+    sent.clear()
+    asyncio.run(jobs.run_daily_now(engine))
+    assert any("Tipps heute" in m or "keine Tipps" in m for m in sent[2:])  # mit DAILY_SAFE=1 auch die sicheren

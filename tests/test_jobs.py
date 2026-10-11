@@ -136,7 +136,7 @@ def test_warned_tips_only_fill_up_with_reason():
     assert text.count("➡️") == 3 and "Torjäger fehlt" in text and "nur klein setzen" in text
 
 
-def test_boost_combo_tips_from_150(engine, monkeypatch):
+def test_boost_combo_tips_from_140(engine, monkeypatch):
     from datetime import datetime, timedelta
 
     from fussball import service
@@ -154,10 +154,10 @@ def test_boost_combo_tips_from_150(engine, monkeypatch):
     monkeypatch.setattr(service, "market_forecasts", lambda engine, hours: fs)
     plan = service.daily_plan(engine, days=3, forecasts=[])
     boost = service.build_extra_combos(plan, "boost")
-    assert boost and boost[0]["boost"] and boost[0]["size"] == 5
-    assert all(0.55 <= l["prob"] <= 0.62 for l in boost[0]["legs"])
+    assert boost and boost[0]["boost"] and boost[0]["size"] in (5, 6)
+    assert all(0.55 <= l["prob"] <= 0.66 for l in boost[0]["legs"])
     legs = boost[0]["legs"]
-    assert all(telegram_bot.leg_sporttip(l) >= 1.5 for l in legs)  # jeder Tipp ab 1.50 → KombiBoost
+    assert all(telegram_bot.leg_sporttip(l) >= 1.4 for l in legs)  # jeder Tipp ab ca. 1.40
     text = telegram_bot.format_boost({"boost_combos": [{**boost[0], "id": "B1"}]})
     assert "Boost-Kombi heute" in text and "Quote ca." in text and "Gesamtquote ca." in text
 
@@ -289,7 +289,11 @@ def test_boost_combo_always_exists_mixed_leagues():
     fs = [MatchForecast(i, c, n, now + timedelta(hours=4, minutes=10 * i), f"H{i}", f"A{i}", 1.6, 1.3, {}, {}, {},
                         None, None, 0.0, {}, implied={"OU2.5": {"O": 0.58, "U": 0.42}, "BTTS": {"Y": 0.57, "N": 0.43}})
           for i, (c, n) in enumerate(comps)]
-    bc = {"size": 5, "min_prob": 0.55, "max_prob": 0.62}
+    bc = {"size": 6, "min_prob": 0.55, "max_prob": 0.66}
+    six = fs + [MatchForecast(9, "soccer_epl", "EPL", now + timedelta(hours=6), "H9", "A9", 1.6, 1.3, {}, {}, {},
+                              None, None, 0.0, {}, implied={"OU2.5": {"O": 0.64, "U": 0.36}})]
+    (combo,) = service.boost_fallback(six, [], bc, now=now)
+    assert combo["size"] == 6 and max(lg["prob"] for lg in combo["legs"]) <= 0.66  # 6 Tipps, auch ~1.40er
     (combo,) = service.boost_fallback(fs, [], bc, now=now)
     assert combo["size"] == 5 and combo["cat"] == "gemischt" and combo["day"] == "2026-10-12"
     (combo,) = service.boost_fallback(fs[:3], [], bc, now=now)

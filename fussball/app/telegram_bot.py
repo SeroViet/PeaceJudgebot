@@ -407,7 +407,7 @@ TORFEST_BT = ("Nur die torreichsten Spiele. Im Test mit 2003 torreichen Spielen:
 
 
 def format_boost(plan: dict, key: str = "boost_combos",
-                 title: str = "🚀 <b>Boost-Kombi heute</b> (jeder Tipp ab Quote 1.50 → KombiBoost)") -> str:
+                 title: str = "🚀 <b>Boost-Kombi heute</b> (5–6 Tipps, jeder ab Quote ca. 1.40)") -> str:
     """Kurz: Boost- bzw. Torfest-Kombis von heute, eine Zeile pro Spiel."""
     from datetime import datetime
 
@@ -434,8 +434,11 @@ def format_boost(plan: dict, key: str = "boost_combos",
                        f"➡️ {tip(l['label'])} · {l['prob']:.0%} · Quote ca. {leg_sporttip(l):.2f}{mark}"
                        + (f"\n<i>🔴 {html.escape(a['reason'])}</i>"
                           if a.get("assessment") in ("vorsicht", "streichen") and a.get("reason") else ""))
-        out.append(f"<i>Gesamtquote ca. {sporttip_odds(c):.1f}{' + Boost' if c.get('boost') else ''} · "
-                   f"Chance {c['prob']:.0%}</i>")
+        all_150 = all(leg_sporttip(lg) >= 1.5 for lg in c["legs"])
+        out.append(f"<i>Gesamtquote ca. {sporttip_odds(c):.1f}{' + KombiBoost' if c.get('boost') and all_150 else ''}"
+                   f" · Chance {c['prob']:.0%}</i>")
+        if c.get("boost") and not all_150:
+            out.append("<i>ℹ️ Tipps unter 1.50 dabei → ohne Sporttip-KombiBoost.</i>")
     if key == "boost_combos":
         out.append("\n<i>⚠️ Mutiger Schein: gewinnt selten, dafür viel. Nur kleiner Einsatz (z. B. 2–5 CHF).</i>")
     return "\n".join(out)
@@ -618,7 +621,7 @@ def format_stats(engine) -> str:
 
 
 COMMANDS = [
-    ("boost", "Boost-Kombi von heute (jeder Tipp ab 1.50, KombiBoost)"),
+    ("boost", "Boost-Kombi von heute (5–6 Tipps ab Quote 1.40)"),
     ("top5", "Die 5–6 sichersten Tipps von heute, vom Scout geprüft"),
     ("tageskombi", "Sichere 3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("ergebnisse", "Deine Tipps: 🟢 gewonnen / 🔴 verloren"),
@@ -668,7 +671,7 @@ def build(engine) -> Application | None:
             return
         await reply(update, "👋 PeaceJudge ist bereit.\n/top5 – die sichersten Tipps von heute\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/tageskombi – 3er- und 5er-Kombi, alle Spiele am selben Tag\n"
-                            "/boost – Boost-Kombi: Tipps ab 1.50 + KombiBoost\n"
+                            "/boost – Boost-Kombi: 5–6 Tipps ab Quote 1.40\n"
                             "/torfest – 1. Halbzeit Über 1.5 in den torreichsten Spielen\n"
                             "/risiko – Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8\n"
                             "/krass – Krass-Kombi: 3 BetBuilder, Quote ca. 8–25\n"
@@ -752,7 +755,7 @@ def build(engine) -> Application | None:
         plan = state.load_plan()
         combos = plan.get("boost_combos", [])
         await reply(update, format_day_combos({**plan, "day_combos": combos}, max_days=2) if combos
-                    else "Keine Boost-Kombi möglich (zu wenige Spiele mit Tipps ab Quote 1.50).")
+                    else "Keine Boost-Kombi möglich (zu wenige Spiele mit Tipps ab Quote 1.40).")
 
     async def cmd_torfest(update: Update, _ctx):
         plan = state.load_plan()

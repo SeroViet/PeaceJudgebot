@@ -981,6 +981,12 @@ def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: i
         if legs:
             for leg, r in zip(legs, runner.check_tips(engine, legs, client=client, local_time=local)):
                 done[leg["match_id"]] = r
+            # Gegenprüfer: jeder bestätigte Tipp wird gezielt angegriffen (letztes Duell, Torflaute, Ausfälle …)
+            ok = [lg for lg in legs if done[lg["match_id"]].get("assessment") == "bestätigt"]
+            if ok and os.getenv("AGENT_CHALLENGE", "1") == "1":
+                for leg, c in zip(ok, runner.challenge_tips(engine, ok, client=client, local_time=local)):
+                    if c.get("assessment") in ("vorsicht", "streichen"):
+                        done[leg["match_id"]] = c
         for leg in combos[0]["legs"]:
             r = done.get(leg["match_id"]) or {}
             if r.get("assessment"):
@@ -1013,7 +1019,7 @@ def boost_day(combos: list[dict], now: datetime | None = None) -> str | None:
 
 def boost_fallback(pool: list[MatchForecast], combos: list[dict], bc: dict, skip: set[int] | None = None,
                    now: datetime | None = None) -> list[dict]:
-    """Die Boost-Kombi muss es jeden Tag geben. Reicht ein Wettbewerb allein nicht für 5 Tipps ab Quote 1.50,
+    """Die Boost-Kombi muss es jeden Tag geben. Reicht ein Wettbewerb allein nicht für 6 Tipps ab Quote 1.40,
     wird gemischt (alle Ligen), die Chance pro Tipp etwas tiefer erlaubt (bis 45 %) und notfalls auf 4 bzw. 3 Tipps
     verkürzt; gibt es heute gar nichts mehr, kommt die Kombi für morgen."""
     from fussball.app.state import local
@@ -1030,7 +1036,7 @@ def boost_fallback(pool: list[MatchForecast], combos: list[dict], bc: dict, skip
                                                   exclude=RISKY_EXCLUDED)
                     if local(t["kickoff"]).date() == day and datetime.fromisoformat(t["kickoff"]) > now]
             legs.sort(key=lambda t: -t["prob"])
-            for n in (size, 4, 3):
+            for n in dict.fromkeys((size, 5, 4, 3)):  # 6 → 5 → 4 → 3 Tipps
                 if len(legs) >= n:
                     chosen = sorted(_varied(legs, n), key=lambda t: t["kickoff"])
                     prob = float(np.prod([t["prob"] for t in chosen]))

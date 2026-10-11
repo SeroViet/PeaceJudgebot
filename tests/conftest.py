@@ -28,3 +28,4 @@ def bundesliga():
 def generous_agent_budget(monkeypatch):
     """Tests prüfen Logik, nicht das Budget – einzelne Tests setzen ein knappes Limit selbst."""
     monkeypatch.setenv("AGENT_DAILY_BUDGET_USD", "50")
+    monkeypatch.setenv("RESULTS_RESERVE_USD", "0")

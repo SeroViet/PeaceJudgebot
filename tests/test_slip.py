@@ -138,8 +138,8 @@ def test_tracking_green_red(engine, fixture_bytes, bundesliga):
     done = tracking.settle(engine)
     assert [d["won"] for d in done] == [True, False]
     text = telegram_bot.format_results(done)
-    assert "🟢 <b>A – B</b>\n" in text and "🔴 <b>C – D</b>\n" in text  # nur die Namen
-    assert "Über 1.5" not in text and "2:1" not in text
+    assert "🟢 <b>A – B</b> 2:1" in text and "🔴 <b>C – D</b> 0:1" in text  # Teams, 🟢/🔴 und Endstand
+    assert "Über 1.5" not in text
     assert "1 von 2 gewonnen" in text and "fair" not in text
     batches = tracking.finished_batches(engine)
     assert len(batches) == 1 and len(batches[0][1]) == 2  # eine Meldung, wenn alle Spiele des Scheins fertig sind
@@ -179,7 +179,10 @@ def test_bot_top_tips_tracked_per_day(engine, fixture_bytes, bundesliga):
         m.status, m.ft_home, m.ft_away = "finished", 0, 1
     tracking.settle(engine)
     (title, items), = tracking.finished_batches(engine)
-    assert "Top-Tipps 04.10." in title and [i["won"] for i in items] == [True, False]
+    from fussball.tracking import _local_day
+
+    d = _local_day(k1)
+    assert f"Top-Tipps {d[8:10]}.{d[5:7]}." in title and [i["won"] for i in items] == [True, False]
 
 
 def test_agent_fills_halftime_for_halftime_tips(engine, fixture_bytes, bundesliga):
@@ -238,5 +241,5 @@ def test_results_filled_by_agent_when_api_has_none(engine, fixture_bytes, bundes
     done = tracking.settle(engine)
     assert done[0]["won"] is True and done[0]["score"] == "2:1"
     (title, items), = tracking.finished_batches(engine)
-    assert "🟢 <b>A – B</b>" in telegram_bot.format_results(items, title)
+    assert "🟢 <b>A – B</b> 2:1" in telegram_bot.format_results(items, title)
     assert tracking.stats(engine)["reported"] == 1

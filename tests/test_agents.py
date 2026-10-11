@@ -413,3 +413,10 @@ def test_boost_combo_checked_and_warned_leg_replaced(engine, monkeypatch):
     assert [lg["match_id"] for lg in legs] == [0, 2, 3, 4, 9]  # gewarntes Spiel 1 ersetzt
     assert sorted(checked) == [0, 1, 2, 3, 4, 9]  # schon geprüfte nicht doppelt
     assert all(lg["agent"]["assessment"] == "bestätigt" for lg in legs)
+
+
+def test_agents_leave_reserve_for_results(monkeypatch):
+    monkeypatch.setenv("AGENT_DAILY_BUDGET_USD", "4")
+    monkeypatch.setenv("RESULTS_RESERVE_USD", "0.4")
+    assert runner.agent_budget() == pytest.approx(3.6)  # Agenten stoppen früher …
+    assert runner.daily_budget() == 4.0  # … damit für die 🟢/🔴-Ergebnisse noch Geld da ist

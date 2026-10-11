@@ -77,6 +77,16 @@ def market_parts(market: str, selection: str) -> list[Part] | None:
     return None
 
 
+def _local_day(kickoff: str | None) -> str | None:
+    if not kickoff:
+        return None
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return datetime.fromisoformat(kickoff).replace(tzinfo=ZoneInfo("UTC")).astimezone(
+        ZoneInfo("Europe/Zurich")).date().isoformat()
+
+
 def track_tips(engine: Engine, tips: list[dict], day: str, batch: str | None = None,
                title: str | None = None) -> int:
     """Die Tipps, die der Bot verschickt hat (Top-Tipps, Boost-Kombi), merken – Ergebnis kommt nach dem letzten Spiel."""
@@ -85,8 +95,10 @@ def track_tips(engine: Engine, tips: list[dict], day: str, batch: str | None = N
         parts = ([Part(m, sel, float(line), half) for m, sel, line, half in t["parts"]] if t.get("parts")
                  else market_parts(t["market"], t["selection"]))
         if parts:
-            new.append(_item(t["match_id"], t["match"], t["kickoff"], t["label"], parts, batch or f"top-{day}",
-                             title or f"📋 <b>Ergebnis Top-Tipps {day[8:10]}.{day[5:7]}.</b>"))
+            # pro Spieltag eine Meldung (Tipps für morgen kommen in die Meldung von morgen)
+            d = _local_day(t["kickoff"]) or day
+            new.append(_item(t["match_id"], t["match"], t["kickoff"], t["label"], parts, batch or f"top-{d}",
+                             title or f"📋 <b>Ergebnis Top-Tipps {d[8:10]}.{d[5:7]}.</b>"))
     return _store(engine, new)
 
 

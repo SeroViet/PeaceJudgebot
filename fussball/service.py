@@ -1069,7 +1069,7 @@ def apply_agents_top(engine: Engine, plan: "DailyPlan", client=None, horizon_h: 
 
     res, passed, queue, stop = [], 0, list(todo), False
     while queue and passed < want and not stop and time.monotonic() < deadline:
-        room = int((runner.daily_budget() - runner.spent_today(engine)) // per_tip)
+        room = int((runner.agent_budget() - runner.spent_today(engine)) // per_tip)
         k = min(workers, want - passed, len(queue), room)
         if k <= 0:
             break  # Tageslimit: lieber weniger Tipps als über das Budget

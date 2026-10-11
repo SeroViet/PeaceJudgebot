@@ -24,6 +24,12 @@ def max_cost_per_match() -> float:
     return float(os.getenv("AGENT_MAX_COST_PER_MATCH", default))
 
 
+def agent_budget() -> float:
+    """Budget für die Tipp-Prüfung: Tageslimit minus Reserve fürs Nachschlagen der Ergebnisse
+    (sonst kommt die 🟢/🔴-Meldung nicht, wenn die Agenten das Limit morgens aufbrauchen)."""
+    return max(0.0, daily_budget() - float(os.getenv("RESULTS_RESERVE_USD", "0.4")))
+
+
 def daily_budget() -> float:
     return float(os.getenv("AGENT_DAILY_BUDGET_USD", "1.5"))
 
@@ -204,8 +210,8 @@ def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float
         if cached_only:
             continue
         # nie über das Limit: vorher prüfen, ob ein weiteres Spiel (höchstens ~0.50 $) noch hineinpasst
-        if spent_today(engine) + max_cost_per_match() > daily_budget():
-            log.warning("Agenten-Tagesbudget erreicht (%.2f USD)", daily_budget())
+        if spent_today(engine) + max_cost_per_match() > agent_budget():
+            log.warning("Agenten-Tagesbudget erreicht (%.2f USD)", agent_budget())
             break
         kickoff = local_time(leg["kickoff"]) if local_time else leg["kickoff"]
         try:
@@ -245,7 +251,7 @@ def check_tips(engine: Engine, items: list[dict], client=None, local_time=None, 
             continue
         if it.get("match_id") is None:
             # Spiel nicht in unseren Daten: trotzdem über die Teamnamen recherchieren (ohne Speicher)
-            if spent_today(engine) + max_cost_per_match() > daily_budget():
+            if spent_today(engine) + max_cost_per_match() > agent_budget():
                 res["reason"] = "Tageslimit erreicht – morgen wieder"
             else:
                 try:
@@ -265,7 +271,7 @@ def check_tips(engine: Engine, items: list[dict], client=None, local_time=None, 
                 intel = scout.MatchIntel.model_validate(cached.data)  # genau dieser Tipp wurde schon geprüft
                 res.update(assessment=intel.tip_assessment, reason=intel.tip_reason)
             elif cached is not None:
-                if spent_today(engine) + 0.05 > daily_budget():
+                if spent_today(engine) + 0.05 > agent_budget():
                     res["reason"] = "Tageslimit erreicht – morgen wieder"
                 else:
                     intel = scout.MatchIntel.model_validate(cached.data)
@@ -293,7 +299,7 @@ def challenge_tips(engine: Engine, items: list[dict], client=None, local_time=No
     out = []
     for it in items:
         res = {"assessment": None, "reason": ""}
-        if client is None or spent_today(engine) + 0.25 > daily_budget():
+        if client is None or spent_today(engine) + 0.25 > agent_budget():
             res["reason"] = "Tageslimit erreicht – Gegenprüfung fehlt"
             out.append(res)
             continue

@@ -948,9 +948,10 @@ def build_extra_combos(plan: "DailyPlan", kind: str, skip: set[int] | None = Non
             skip=skip, markets=("H1_OU1.5",), exclude={("H1_OU1.5", "U")})]
     if kind == "boost":
         bc = plan.config.get("boost_combo", {})
-        return [{**c, "boost": True, "risky": False} for c in risky_combos(
+        combos = [{**c, "boost": True, "risky": False} for c in risky_combos(
             pool, plan.day_combos, bc.get("size", 5), bc.get("min_prob", 0.55), bc.get("max_prob", 0.62),
             skip=skip, markets=BOOST_MARKETS)]
+        return combos + boost_fallback(pool, combos, bc, skip)
     if kind == "risky":
         rc = plan.config.get("risky_combo", {})
         return [{**c, "risky": True} for c in builder_combos(
@@ -969,10 +970,10 @@ def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: i
     from fussball.agents import runner
     from fussball.app.state import local
 
-    today = local(utcnow().isoformat()).date().isoformat()
     done: dict[int, dict] = {}
     skip: set[int] = set()
     for _ in range(rounds):
+        today = boost_day(plan.boost_combos)
         combos = [c for c in plan.boost_combos if c["day"] == today][:1]
         if not combos:
             return list(done.values())
@@ -999,6 +1000,44 @@ def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: i
             if r.get("assessment") and "agent" not in leg:
                 leg["agent"] = {"assessment": r["assessment"], "reason": r.get("reason", "")}
     return list(done.values())
+
+
+def boost_day(combos: list[dict], now: datetime | None = None) -> str | None:
+    """Tag der Boost-Kombi, die verschickt wird: heute, sonst der nächste Tag mit einer Boost-Kombi."""
+    from fussball.app.state import local
+
+    today = local((now or utcnow()).isoformat()).date().isoformat()
+    days = sorted({c["day"] for c in combos if c["day"] >= today})
+    return days[0] if days else None
+
+
+def boost_fallback(pool: list[MatchForecast], combos: list[dict], bc: dict, skip: set[int] | None = None,
+                   now: datetime | None = None) -> list[dict]:
+    """Die Boost-Kombi muss es jeden Tag geben. Reicht ein Wettbewerb allein nicht für 5 Tipps ab Quote 1.50,
+    wird gemischt (alle Ligen), die Chance pro Tipp etwas tiefer erlaubt (bis 45 %) und notfalls auf 4 bzw. 3 Tipps
+    verkürzt; gibt es heute gar nichts mehr, kommt die Kombi für morgen."""
+    from fussball.app.state import local
+
+    now = now or utcnow()
+    today = local(now.isoformat()).date()
+    if any(c["day"] == today.isoformat() for c in combos):
+        return []
+    size = bc.get("size", 5)
+    pool = [f for f in pool if f.match_id not in (skip or set())]
+    for day in (today, today + timedelta(days=1)):
+        for lo in (bc.get("min_prob", 0.55), 0.50, 0.45):
+            legs = [t for t in best_tip_per_match(pool, lo, bc.get("max_prob", 0.62), BOOST_MARKETS,
+                                                  exclude=RISKY_EXCLUDED)
+                    if local(t["kickoff"]).date() == day and datetime.fromisoformat(t["kickoff"]) > now]
+            legs.sort(key=lambda t: -t["prob"])
+            for n in (size, 4, 3):
+                if len(legs) >= n:
+                    chosen = sorted(_varied(legs, n), key=lambda t: t["kickoff"])
+                    prob = float(np.prod([t["prob"] for t in chosen]))
+                    return [{"day": day.isoformat(), "size": n, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
+                             "leg_min": min(t["prob"] for t in chosen), "boost": True, "risky": False,
+                             "cat": "gemischt"}]
+    return []
 
 
 def apply_agents_risky(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,

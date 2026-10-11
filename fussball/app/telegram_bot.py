@@ -58,7 +58,7 @@ def tip(label: str) -> str:
     return f"<code>{html.escape(label)}</code>"
 
 
-SHORT_CAT = {"national": "🌍 Länderspiele", "europa": "🏆 Europapokal", "liga_eu": "🇪🇺 Ligen Europa",
+SHORT_CAT = {"gemischt": "🌐 Alle Ligen", "national": "🌍 Länderspiele", "europa": "🏆 Europapokal", "liga_eu": "🇪🇺 Ligen Europa",
              "suedamerika": "🌎 Südamerika", "nordamerika": "🇺🇸 Nordamerika", "asien": "🌏 Asien & Australien",
              "andere": "⚽ Andere Ligen"}
 
@@ -412,9 +412,15 @@ def format_boost(plan: dict, key: str = "boost_combos",
     from datetime import datetime
 
     today = datetime.now(state.TZ).date().isoformat()
-    combos = [c for c in plan.get(key, []) if c["day"] == today]
     if key == "boost_combos":
-        combos = combos[:1]  # genau eine Boost-Kombi pro Tag
+        from fussball.service import boost_day
+
+        day = boost_day(plan.get(key, []))  # heute, sonst die nächste (die Boost-Kombi gibt es immer)
+        combos = [c for c in plan.get(key, []) if c["day"] == day][:1]  # genau eine Boost-Kombi
+        if day and day != today:
+            title = title.replace("heute", f"für {day[8:10]}.{day[5:7]}.")
+    else:
+        combos = [c for c in plan.get(key, []) if c["day"] == today]
     if not combos:
         return ""
     icon = {"bestätigt": " 🟢", "vorsicht": " 🔴", "streichen": " ❌"}

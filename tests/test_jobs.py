@@ -274,3 +274,27 @@ def test_daily_sends_only_boost_by_default(engine, monkeypatch):
     sent.clear()
     asyncio.run(jobs.run_daily_now(engine))
     assert any("Tipps heute" in m or "keine Tipps" in m for m in sent[2:])  # mit DAILY_SAFE=1 auch die sicheren
+
+
+def test_boost_combo_always_exists_mixed_leagues():
+    """Nur 2 Spiele pro Liga – trotzdem eine Boost-Kombi (gemischt über alle Ligen), sonst 4er/3er oder morgen."""
+    from datetime import datetime, timedelta
+
+    from fussball import service
+    from fussball.service import MatchForecast
+
+    now = datetime(2026, 10, 12, 8, 0)
+    comps = [("soccer_epl", "EPL"), ("soccer_epl", "EPL"), ("soccer_spain_la_liga", "La Liga"),
+             ("soccer_spain_la_liga", "La Liga"), ("soccer_italy_serie_a", "Serie A")]
+    fs = [MatchForecast(i, c, n, now + timedelta(hours=4, minutes=10 * i), f"H{i}", f"A{i}", 1.6, 1.3, {}, {}, {},
+                        None, None, 0.0, {}, implied={"OU2.5": {"O": 0.58, "U": 0.42}, "BTTS": {"Y": 0.57, "N": 0.43}})
+          for i, (c, n) in enumerate(comps)]
+    bc = {"size": 5, "min_prob": 0.55, "max_prob": 0.62}
+    (combo,) = service.boost_fallback(fs, [], bc, now=now)
+    assert combo["size"] == 5 and combo["cat"] == "gemischt" and combo["day"] == "2026-10-12"
+    (combo,) = service.boost_fallback(fs[:3], [], bc, now=now)
+    assert combo["size"] == 3  # weniger Spiele: kürzere Kombi statt gar keine
+    late = now + timedelta(hours=10)  # heute alle Spiele vorbei → keine Kombi mehr für heute
+    assert service.boost_fallback(fs, [], bc, now=late) == []
+    text = telegram_bot.format_boost({"boost_combos": [{**combo, "day": "2099-01-01"}]})
+    assert "Boost-Kombi für 01.01." in text and "Alle Ligen" in text

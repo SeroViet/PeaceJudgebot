@@ -91,7 +91,9 @@ def _track_boost(engine, plan: dict) -> None:
     from fussball import tracking
 
     try:
-        day = datetime.now(state.TZ).date().isoformat()
+        from fussball.service import boost_day
+
+        day = boost_day(plan.get("boost_combos", [])) or datetime.now(state.TZ).date().isoformat()
         combo = next((c for c in plan.get("boost_combos", []) if c["day"] == day), None)
         if combo:
             tracking.track_tips(engine, combo["legs"], day, batch=f"boost-{day}",

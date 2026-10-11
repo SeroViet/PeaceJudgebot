@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.24", "respx>=0.21", "ruff>=0.6"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "respx>=0.21", "ruff==0.17.0"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -39,3 +39,6 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "ASYNC"]
 ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["alpha_scout"]

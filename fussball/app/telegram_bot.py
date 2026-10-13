@@ -413,41 +413,12 @@ def sporttip_odds(c: dict) -> float:
     return out
 
 
-def system_lines(c: dict) -> list[str]:
-    """Kombi vs. Systemwette für eine Kombi: Reihen, erlaubte Fehler und Auszahlung je 1 CHF pro Reihe.
-    Rechnet mit den Sporttip-Quoten der einzelnen Tipps (exakt über alle Reihen)."""
-    from itertools import combinations
-    from math import comb
-
-    odds = [leg_sporttip(lg) for lg in c["legs"]]
-    n = len(odds)
-    if n < 4:
-        return []
-
-    def pay(r: int, wrong: int) -> float:
-        # schlechtester Fall: die Fehler sind die Tipps mit der höchsten Quote
-        hits = sorted(odds)[: n - wrong]
-        return sum(float(__import__("math").prod(x)) for x in combinations(hits, r))
-
-    out = ["\n💡 <b>So spielen</b> (je 1 CHF pro Reihe):",
-           f"• <b>Kombi</b> ({n}/{n}): 1 Reihe = 1 CHF · alle richtig ≈ {pay(n, 0):.0f} CHF"]
-    for r in (n - 1, n - 2):
-        rows = comb(n, r)
-        line = (f"• <b>System {r}/{n}</b>: {rows} Reihen = {rows} CHF · alle richtig ≈ {pay(r, 0):.0f} CHF"
-                f" · 1 Fehler ≈ {pay(r, 1):.0f} CHF")
-        if n - r >= 2:
-            line += f" · 2 Fehler ≈ {pay(r, 2):.0f} CHF"
-        out.append(line)
-    out.append("<i>System = auch mit Fehlern noch Gewinn, dafür kleinerer Höchstgewinn.</i>")
-    return out
-
-
 TORFEST_BT = ("Nur die torreichsten Spiele. Im Test mit 2003 torreichen Spielen: 51 % berechnet → 52 % getroffen. "
               "Geht etwa an 1 von 7–8 Tagen auf. Nur kleiner Einsatz.")
 
 
 def format_boost(plan: dict, key: str = "boost_combos",
-                 title: str = "🚀 <b>Boost-Kombi heute</b> (5–6 Tipps, jeder ab Quote ca. 1.40)") -> str:
+                 title: str = "🚀 <b>Boost-Kombi heute</b> (6 Tipps, jeder ab Quote ca. 1.30)") -> str:
     """Kurz: Boost- bzw. Torfest-Kombis von heute, eine Zeile pro Spiel."""
     from datetime import datetime
 
@@ -480,8 +451,7 @@ def format_boost(plan: dict, key: str = "boost_combos",
         if c.get("boost") and not all_150:
             out.append("<i>ℹ️ Tipps unter 1.50 dabei → ohne Sporttip-KombiBoost.</i>")
     if key == "boost_combos":
-        out += system_lines(combos[0])
-        out.append("\n<i>⚠️ Mutiger Schein: nur kleiner Einsatz (z. B. 1 CHF pro Reihe).</i>")
+        out.append("\n<i>💡 Als normale Kombi spielen (keine Systemwette) · nur kleiner Einsatz.</i>")
     return "\n".join(out)
 
 
@@ -662,7 +632,7 @@ def format_stats(engine) -> str:
 
 
 COMMANDS = [
-    ("boost", "Boost-Kombi von heute (5–6 Tipps ab Quote 1.40)"),
+    ("boost", "Boost-Kombi von heute (6 Tipps ab Quote 1.30)"),
     ("top5", "Die 5–6 sichersten Tipps von heute, vom Scout geprüft"),
     ("tageskombi", "Sichere 3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("ergebnisse", "Bilanz + letzte Tipps: 🟢 gewonnen / 🔴 verloren"),
@@ -723,7 +693,7 @@ def build(engine) -> Application | None:
             return
         await reply(update, "👋 PeaceJudge ist bereit.\n/top5 – die sichersten Tipps von heute\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/tageskombi – 3er- und 5er-Kombi, alle Spiele am selben Tag\n"
-                            "/boost – Boost-Kombi: 5–6 Tipps ab Quote 1.40\n"
+                            "/boost – Boost-Kombi: 6 Tipps ab Quote 1.30\n"
                             "/torfest – 1. Halbzeit Über 1.5 in den torreichsten Spielen\n"
                             "/risiko – Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8\n"
                             "/krass – Krass-Kombi: 3 BetBuilder, Quote ca. 8–25\n"
@@ -807,7 +777,7 @@ def build(engine) -> Application | None:
         plan = state.load_plan()
         combos = plan.get("boost_combos", [])
         await reply(update, format_day_combos({**plan, "day_combos": combos}, max_days=2) if combos
-                    else "Keine Boost-Kombi möglich (zu wenige Spiele mit Tipps ab Quote 1.40).")
+                    else "Keine Boost-Kombi möglich (zu wenige Spiele mit Tipps ab Quote 1.30).")
 
     async def cmd_torfest(update: Update, _ctx):
         plan = state.load_plan()

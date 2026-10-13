@@ -266,7 +266,7 @@ async def _run_daily_locked(engine, loop) -> None:
         sent = True
     if safe_on() or not boost:  # sichere Tipps nur auf Wunsch – oder als Ersatz, wenn heute keine Boost-Kombi geht
         if not boost:
-            await telegram_bot.notify(_bot, "ℹ️ Heute ist keine Boost-Kombi möglich (zu wenige Tipps ab Quote 1.40) "
+            await telegram_bot.notify(_bot, "ℹ️ Heute ist keine Boost-Kombi möglich (zu wenige Tipps ab Quote 1.30) "
                                       "– hier die sicheren Tipps:")
         await telegram_bot.notify(_bot, telegram_bot.format_top5(plan), share=True)
         _track_top(engine, plan)

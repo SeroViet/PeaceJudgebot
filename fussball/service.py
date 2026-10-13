@@ -1031,8 +1031,8 @@ def boost_day(combos: list[dict], now: datetime | None = None) -> str | None:
 
 def boost_fallback(pool: list[MatchForecast], combos: list[dict], bc: dict, skip: set[int] | None = None,
                    now: datetime | None = None) -> list[dict]:
-    """Die Boost-Kombi muss es jeden Tag geben. Reicht ein Wettbewerb allein nicht für 6 Tipps ab Quote 1.40,
-    wird gemischt (alle Ligen), die Chance pro Tipp etwas tiefer erlaubt (bis 45 %) und notfalls auf 4 bzw. 3 Tipps
+    """Die Boost-Kombi muss es jeden Tag geben. Reicht ein Wettbewerb allein nicht für 6 Tipps ab Quote 1.30,
+    wird gemischt (alle Ligen), die Chance pro Tipp etwas tiefer erlaubt (bis 50 %) und notfalls auf 4 bzw. 3 Tipps
     verkürzt; gibt es heute gar nichts mehr, kommt die Kombi für morgen."""
     from fussball.app.state import local
 
@@ -1043,7 +1043,7 @@ def boost_fallback(pool: list[MatchForecast], combos: list[dict], bc: dict, skip
     size = bc.get("size", 5)
     pool = [f for f in pool if f.match_id not in (skip or set())]
     for day in (today, today + timedelta(days=1)):
-        for lo in (bc.get("min_prob", 0.55), 0.50, 0.45):
+        for lo in (bc.get("min_prob", 0.60), 0.55, 0.50):
             legs = [t for t in best_tip_per_match(pool, lo, bc.get("max_prob", 0.62), BOOST_MARKETS,
                                                   exclude=RISKY_EXCLUDED)
                     if local(t["kickoff"]).date() == day and datetime.fromisoformat(t["kickoff"]) > now]

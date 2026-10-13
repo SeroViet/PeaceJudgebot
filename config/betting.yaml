@@ -43,8 +43,8 @@ risky_combo:
 # Boost-Kombi: Sporttip-KombiBoost gibt es nur für Tipps ab Quote 1.50 → 5 Tipps mit 55–62 %
 boost_combo:
   size: 6          # 6 Tipps, notfalls 5 (dann 4/3, damit es die Kombi jeden Tag gibt)
-  min_prob: 0.55
-  max_prob: 0.66   # ≈ Sporttip-Quote ab 1.40 (KombiBoost von Sporttip erst ab 1.50 pro Tipp)
+  min_prob: 0.60   # nicht viel Risiko: jeder Tipp mind. 60 % (≈ Quote bis ca. 1.55)
+  max_prob: 0.71   # ≈ Sporttip-Quote ab 1.30 (KombiBoost von Sporttip erst ab 1.50 pro Tipp)
 
 # Torfest-Kombi: "1. Halbzeit Über 1.5" in den torreichsten Spielen (ab 2.9 erwarteten Toren)
 torfest_combo:

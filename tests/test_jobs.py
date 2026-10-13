@@ -155,9 +155,9 @@ def test_boost_combo_tips_from_140(engine, monkeypatch):
     plan = service.daily_plan(engine, days=3, forecasts=[])
     boost = service.build_extra_combos(plan, "boost")
     assert boost and boost[0]["boost"] and boost[0]["size"] in (5, 6)
-    assert all(0.55 <= l["prob"] <= 0.66 for l in boost[0]["legs"])
+    assert all(0.60 <= l["prob"] <= 0.71 for l in boost[0]["legs"])
     legs = boost[0]["legs"]
-    assert all(telegram_bot.leg_sporttip(l) >= 1.4 for l in legs)  # jeder Tipp ab ca. 1.40
+    assert all(telegram_bot.leg_sporttip(l) >= 1.3 for l in legs)  # jeder Tipp ab ca. 1.30
     text = telegram_bot.format_boost({"boost_combos": [{**boost[0], "id": "B1"}]})
     assert "Boost-Kombi heute" in text and "Quote ca." in text and "Gesamtquote ca." in text
 
@@ -289,11 +289,11 @@ def test_boost_combo_always_exists_mixed_leagues():
     fs = [MatchForecast(i, c, n, now + timedelta(hours=4, minutes=10 * i), f"H{i}", f"A{i}", 1.6, 1.3, {}, {}, {},
                         None, None, 0.0, {}, implied={"OU2.5": {"O": 0.58, "U": 0.42}, "BTTS": {"Y": 0.57, "N": 0.43}})
           for i, (c, n) in enumerate(comps)]
-    bc = {"size": 6, "min_prob": 0.55, "max_prob": 0.66}
+    bc = {"size": 6, "min_prob": 0.60, "max_prob": 0.71}
     six = fs + [MatchForecast(9, "soccer_epl", "EPL", now + timedelta(hours=6), "H9", "A9", 1.6, 1.3, {}, {}, {},
                               None, None, 0.0, {}, implied={"OU2.5": {"O": 0.64, "U": 0.36}})]
     (combo,) = service.boost_fallback(six, [], bc, now=now)
-    assert combo["size"] == 6 and max(lg["prob"] for lg in combo["legs"]) <= 0.66  # 6 Tipps, auch ~1.40er
+    assert combo["size"] == 6 and max(lg["prob"] for lg in combo["legs"]) <= 0.71  # 6 Tipps, auch ~1.30er
     (combo,) = service.boost_fallback(fs, [], bc, now=now)
     assert combo["size"] == 5 and combo["cat"] == "gemischt" and combo["day"] == "2026-10-12"
     (combo,) = service.boost_fallback(fs[:3], [], bc, now=now)
@@ -351,13 +351,18 @@ def test_owner_warned_when_agents_cannot_check(engine, monkeypatch):
     runner.LAST_ERROR.update(msg=None, at=None)
 
 
-def test_system_bet_suggestion_for_boost():
-    legs = [{"prob": 0.6, "sporttip_est": 1.55} for _ in range(6)]
-    text = "\n".join(telegram_bot.system_lines({"legs": legs}))
-    assert "Kombi</b> (6/6): 1 Reihe = 1 CHF · alle richtig ≈ 14 CHF" in text
-    assert "System 5/6</b>: 6 Reihen = 6 CHF · alle richtig ≈ 54 CHF · 1 Fehler ≈ 9 CHF" in text
-    assert "System 4/6</b>: 15 Reihen = 15 CHF · alle richtig ≈ 87 CHF · 1 Fehler ≈ 29 CHF · 2 Fehler ≈ 6 CHF" in text
-    assert telegram_bot.system_lines({"legs": legs[:3]}) == []
+def test_boost_is_plain_kombi_without_system():
+    from datetime import datetime, timedelta
+
+    from fussball.app import state
+
+    day = (datetime.now(state.TZ) + timedelta(days=1)).replace(hour=18, minute=0, second=0, microsecond=0)
+    legs = [{"prob": 0.65, "label": "OU2.5 O", "match": f"H{i} - A{i}", "kickoff": day.isoformat()} for i in range(6)]
+    combo = {"day": day.date().isoformat(), "size": 6, "legs": legs, "prob": 0.65 ** 6, "boost": True,
+             "cat": "gemischt", "id": "B1"}
+    text = telegram_bot.format_boost({"boost_combos": [combo]})
+    assert "6 Tipps, jeder ab Quote ca. 1.30" in text and "normale Kombi" in text
+    assert "System" not in text.replace("keine Systemwette", "") and "Reihe" not in text
 
 
 def test_bilanz_counts_bot_tips_not_own_slips(engine):

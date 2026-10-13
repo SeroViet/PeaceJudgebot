@@ -77,9 +77,17 @@ def load_plan() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _note(exc: Exception) -> None:
+    from fussball.agents import runner
+
+    runner.note_error(exc)
+
+
 def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = False) -> dict:
-    """Daten laden, Wetten abrechnen, Prognosen und Plan neu berechnen."""
-    if not _lock.acquire(blocking=False):
+    """Daten laden, Wetten abrechnen, Prognosen und Plan neu berechnen.
+    Mit Agenten (Tageslauf) wird auf einen laufenden Refresh gewartet statt übersprungen – sonst würden
+    ungeprüfte Tipps verschickt."""
+    if not _lock.acquire(blocking=agents, timeout=3600 if agents else -1):
         return {"skipped": "läuft bereits"}
     _status["running"] = True
     try:
@@ -105,8 +113,9 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
             # Tageskombi nur mit "D" in AGENT_COMBOS neu prüfen – sonst geht das Budget in die 6 sicheren Tipps
             day_scope = agents and "D" in os.getenv("AGENT_COMBOS", "T").upper()
             info["agent"] = service.apply_agents(engine, plan, cached_only=not day_scope)
-        except Exception:  # noqa: BLE001 – ohne Agenten weiterarbeiten
+        except Exception as exc:  # noqa: BLE001 – ohne Agenten weiterarbeiten
             log.exception("Agenten fehlgeschlagen")
+            _note(exc)
         # Die 6 sicheren Tipps (/top5) zuerst prüfen – nur wenn sie täglich verschickt werden (DAILY_SAFE=1);
         # sonst geht das Budget in die Boost-Kombi. Ohne Agentenlauf die letzten Urteile übernehmen (kostenlos)
         try:
@@ -114,8 +123,9 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
                 info["agent"] += service.apply_agents_top(engine, plan)
             else:
                 service.carry_top_agents(plan, old.get("top", []))
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             log.exception("Agenten (Top-Tipps) fehlgeschlagen")
+            _note(exc)
         for kind, attr, letter in (("boost", "boost_combos", "B"), ("torfest", "torfest_combos", "F"),
                                    ("risky", "risky_combos", "R"), ("krass", "krass_combos", "X")):
             setattr(plan, attr, service.build_extra_combos(plan, kind))
@@ -130,8 +140,9 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
                         info["agent"] += service.apply_agents_boost(engine, plan)
                     continue
                 info["agent"] += service.apply_agents_risky(engine, plan, cached_only=not checked, kind=kind)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 log.exception("Agenten (%s) fehlgeschlagen", kind)
+                _note(exc)
         books = plan.config.get("bookmakers") or None
         for combos in (plan.day_combos, plan.boost_combos, plan.torfest_combos, plan.risky_combos,
                        plan.krass_combos):

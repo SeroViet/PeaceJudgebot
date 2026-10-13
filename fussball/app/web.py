@@ -119,7 +119,8 @@ def create_app(engine=None, start_background: bool = True) -> FastAPI:
         for t in top:
             verdicts[t.get("agent") or "ungeprüft"] = verdicts.get(t.get("agent") or "ungeprüft", 0) + 1
         st = state.status()
-        return {"version": os.getenv("RENDER_GIT_COMMIT", "")[:7] or "lokal", "plan_generated": plan.get("generated_at"),
+        return {"version": os.getenv("RENDER_GIT_COMMIT", "")[:7] or "lokal", "db": engine.dialect.name,
+                "plan_generated": plan.get("generated_at"),
                 "forecasts": len(plan.get("forecasts", [])), "top_candidates": len(top), "verdicts": verdicts,
                 "errors": [t.get("reason", "")[:120] for t in top if t.get("agent") == "fehler"][:3],
                 "daily_done": runner.daily_done(engine), "claude_spent": round(runner.spent_today(engine), 2),

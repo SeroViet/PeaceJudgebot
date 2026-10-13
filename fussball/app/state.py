@@ -69,9 +69,46 @@ def serialize_plan(plan: service.DailyPlan) -> dict:
     }
 
 
+_engine_for_plan = None  # gesetzt von refresh(): Plan zusätzlich in der Datenbank (überlebt Neustarts)
+
+
+def _plan_from_db() -> dict | None:
+    if _engine_for_plan is None:
+        return None
+    try:
+        from fussball.data.db import session_scope
+        from fussball.data.schema import AppSetting
+
+        with session_scope(_engine_for_plan) as s:
+            row = s.get(AppSetting, "plan")
+            return dict(row.value) if row and isinstance(row.value, dict) else None
+    except Exception:  # noqa: BLE001
+        log.exception("Plan aus der Datenbank nicht lesbar")
+        return None
+
+
+def _plan_to_db(engine: Engine, data: dict) -> None:
+    from fussball.data.db import session_scope
+    from fussball.data.schema import AppSetting
+
+    try:
+        plain = json.loads(json.dumps(data, default=service.np_default))
+        with session_scope(engine) as s:
+            row = s.get(AppSetting, "plan")
+            if row:
+                row.value = plain
+            else:
+                s.add(AppSetting(key="plan", value=plain))
+    except Exception:  # noqa: BLE001
+        log.exception("Plan nicht in der Datenbank gespeichert")
+
+
 def load_plan() -> dict:
     path = plan_path()
     if not path.exists():
+        db = _plan_from_db()  # nach einem Neustart: letzter Plan aus der Datenbank
+        if db:
+            return db
         return {"generated_at": None, "forecasts": [], "singles": [], "combos": [], "blocked_leagues": [],
                 "currency": "CHF"}
     return json.loads(path.read_text(encoding="utf-8"))
@@ -171,6 +208,13 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
         path = plan_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, default=service.np_default, ensure_ascii=False), encoding="utf-8")
+        global _engine_for_plan
+        _engine_for_plan = engine
+        _plan_to_db(engine, data)
+        try:
+            service.prune_old_odds(engine)  # Datenbank klein halten (Gratis-Speicher)
+        except Exception:  # noqa: BLE001
+            log.exception("Alte Quoten nicht gelöscht")
         info["changes"] = diff_plans(old, data)
         _status.update(last_run=utcnow().isoformat(), last_error=None)
         return info

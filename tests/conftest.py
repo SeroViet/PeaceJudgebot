@@ -9,9 +9,18 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 @pytest.fixture
 def engine(tmp_path):
-    engine = make_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    """SQLite; mit TEST_DATABASE_URL (Postgres) läuft dieselbe Testreihe gegen Postgres."""
+    import os
+
+    from fussball.data.schema import Base
+
+    url = os.getenv("TEST_DATABASE_URL")
+    engine = make_engine(url or f"sqlite:///{tmp_path / 'test.db'}")
+    if url:
+        Base.metadata.drop_all(engine)
     init_db(engine)
-    return engine
+    yield engine
+    engine.dispose()
 
 
 @pytest.fixture

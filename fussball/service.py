@@ -396,6 +396,17 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
     return out
 
 
+def prune_old_odds(engine: Engine, days: int = 10) -> int:
+    """Quoten von Spielen, die länger als `days` Tage vorbei sind, löschen (Ergebnisse bleiben)."""
+    from fussball.data.schema import Odds
+
+    cutoff = utcnow() - timedelta(days=days)
+    with session_scope(engine) as s:
+        old_ids = select(Match.id).where(Match.kickoff_utc < cutoff)
+        res = s.execute(delete(Odds).where(Odds.match_id.in_(old_ids)))
+        return res.rowcount or 0
+
+
 def market_forecasts(engine: Engine, hours: float = 72.0, now: datetime | None = None) -> list[MatchForecast]:
     """Prognosen allein aus Pinnacle-Quoten – für jeden Wettbewerb weltweit, ohne Historie."""
     from fussball.data.schema import Competition, Odds

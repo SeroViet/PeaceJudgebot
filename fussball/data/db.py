@@ -14,10 +14,18 @@ from fussball.data.schema import Base
 
 
 def make_engine(url: str | None = None) -> Engine:
-    url = url or get_settings().database_url
+    url = (url or get_settings().database_url).strip()
+    for prefix in ("postgres://", "postgresql://"):  # Treiber festlegen (psycopg2, in requirements.txt)
+        if url.startswith(prefix):
+            url = "postgresql+psycopg2://" + url.removeprefix(prefix)
     if url.startswith("sqlite:///") and url != "sqlite:///:memory:":
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(url, future=True)
+    if url.startswith("postgresql"):
+        _register_numpy_adapters()
+        # Neon & Co. schliessen ruhende Verbindungen: vor Gebrauch prüfen und regelmässig erneuern
+        engine = create_engine(url, future=True, pool_pre_ping=True, pool_recycle=300, pool_size=5, max_overflow=5)
+    else:
+        engine = create_engine(url, future=True)
     if engine.dialect.name == "sqlite":
 
         @event.listens_for(engine, "connect")
@@ -28,6 +36,18 @@ def make_engine(url: str | None = None) -> Engine:
             cur.close()
 
     return engine
+
+
+def _register_numpy_adapters() -> None:
+    """numpy-Zahlen (z. B. np.float64 aus den Berechnungen) für Postgres lesbar machen – SQLite kann das von selbst."""
+    import numpy as np
+    from psycopg2.extensions import AsIs, Float, register_adapter
+
+    register_adapter(np.float64, lambda v: Float(float(v)))  # auch NaN/Inf korrekt
+    register_adapter(np.float32, lambda v: Float(float(v)))
+    register_adapter(np.int64, lambda v: AsIs(int(v)))
+    register_adapter(np.int32, lambda v: AsIs(int(v)))
+    register_adapter(np.bool_, lambda v: AsIs(bool(v)))
 
 
 def init_db(engine: Engine) -> None:

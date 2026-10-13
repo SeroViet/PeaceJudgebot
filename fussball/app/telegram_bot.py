@@ -343,6 +343,17 @@ def verdict(row: dict, check: dict) -> tuple[bool | None, str]:
     return None, reason or "nicht geprüft"
 
 
+def format_bilanz(sm: dict) -> str:
+    """Kurze Bilanz der Bot-Tipps (seit die Datenbank läuft)."""
+    if not sm.get("decided"):
+        return "📊 <b>Bilanz</b>: noch keine abgerechneten Tipps."
+    lines = ["📊 <b>Bilanz der Bot-Tipps</b>",
+             f"Einzelne Tipps: <b>{sm['won']} von {sm['decided']}</b> getroffen ({sm['won'] / sm['decided']:.0%})"]
+    if sm.get("boost_total"):
+        lines.append(f"Boost-Kombis: <b>{sm['boost_won']} von {sm['boost_total']}</b> komplett gewonnen")
+    return "\n".join(lines)
+
+
 def format_results(items: list[dict], title: str = "📋 <b>Ergebnisse</b>") -> str:
     """Spiele mit Endstand: 🟢 Tipp gewonnen, 🔴 verloren, ⚪ nicht auswertbar, ⏳ läuft noch."""
     if not items:
@@ -402,6 +413,35 @@ def sporttip_odds(c: dict) -> float:
     return out
 
 
+def system_lines(c: dict) -> list[str]:
+    """Kombi vs. Systemwette für eine Kombi: Reihen, erlaubte Fehler und Auszahlung je 1 CHF pro Reihe.
+    Rechnet mit den Sporttip-Quoten der einzelnen Tipps (exakt über alle Reihen)."""
+    from itertools import combinations
+    from math import comb
+
+    odds = [leg_sporttip(lg) for lg in c["legs"]]
+    n = len(odds)
+    if n < 4:
+        return []
+
+    def pay(r: int, wrong: int) -> float:
+        # schlechtester Fall: die Fehler sind die Tipps mit der höchsten Quote
+        hits = sorted(odds)[: n - wrong]
+        return sum(float(__import__("math").prod(x)) for x in combinations(hits, r))
+
+    out = ["\n💡 <b>So spielen</b> (je 1 CHF pro Reihe):",
+           f"• <b>Kombi</b> ({n}/{n}): 1 Reihe = 1 CHF · alle richtig ≈ {pay(n, 0):.0f} CHF"]
+    for r in (n - 1, n - 2):
+        rows = comb(n, r)
+        line = (f"• <b>System {r}/{n}</b>: {rows} Reihen = {rows} CHF · alle richtig ≈ {pay(r, 0):.0f} CHF"
+                f" · 1 Fehler ≈ {pay(r, 1):.0f} CHF")
+        if n - r >= 2:
+            line += f" · 2 Fehler ≈ {pay(r, 2):.0f} CHF"
+        out.append(line)
+    out.append("<i>System = auch mit Fehlern noch Gewinn, dafür kleinerer Höchstgewinn.</i>")
+    return out
+
+
 TORFEST_BT = ("Nur die torreichsten Spiele. Im Test mit 2003 torreichen Spielen: 51 % berechnet → 52 % getroffen. "
               "Geht etwa an 1 von 7–8 Tagen auf. Nur kleiner Einsatz.")
 
@@ -440,7 +480,8 @@ def format_boost(plan: dict, key: str = "boost_combos",
         if c.get("boost") and not all_150:
             out.append("<i>ℹ️ Tipps unter 1.50 dabei → ohne Sporttip-KombiBoost.</i>")
     if key == "boost_combos":
-        out.append("\n<i>⚠️ Mutiger Schein: gewinnt selten, dafür viel. Nur kleiner Einsatz (z. B. 2–5 CHF).</i>")
+        out += system_lines(combos[0])
+        out.append("\n<i>⚠️ Mutiger Schein: nur kleiner Einsatz (z. B. 1 CHF pro Reihe).</i>")
     return "\n".join(out)
 
 
@@ -624,7 +665,7 @@ COMMANDS = [
     ("boost", "Boost-Kombi von heute (5–6 Tipps ab Quote 1.40)"),
     ("top5", "Die 5–6 sichersten Tipps von heute, vom Scout geprüft"),
     ("tageskombi", "Sichere 3er- und 5er-Kombi, alle Spiele am selben Tag"),
-    ("ergebnisse", "Deine Tipps: 🟢 gewonnen / 🔴 verloren"),
+    ("ergebnisse", "Bilanz + letzte Tipps: 🟢 gewonnen / 🔴 verloren"),
     ("jetzt", "Agenten jetzt prüfen lassen und 6 Tipps schicken"),
     ("status", "Laufen die Agenten? Geprüft, gestrichen, Fehler"),
     ("sag", "Nachricht an deine Freunde: /sag Hallo"),
@@ -783,7 +824,7 @@ def build(engine) -> Application | None:
     async def cmd_results(update: Update, _ctx):
         from fussball import tracking
 
-        await reply(update, format_results(tracking.recent(engine)))
+        await reply(update, format_bilanz(tracking.summary(engine)) + "\n\n" + format_results(tracking.recent(engine)))
 
     async def cmd_status(update: Update, _ctx):
         from fussball.agents import runner

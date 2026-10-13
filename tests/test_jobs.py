@@ -349,3 +349,28 @@ def test_owner_warned_when_agents_cannot_check(engine, monkeypatch):
     assert any("Claude-Guthaben leer" in m for m in sent)
     assert "Schlüssel ungültig" in runner.error_hint("AuthenticationError 401")
     runner.LAST_ERROR.update(msg=None, at=None)
+
+
+def test_system_bet_suggestion_for_boost():
+    legs = [{"prob": 0.6, "sporttip_est": 1.55} for _ in range(6)]
+    text = "\n".join(telegram_bot.system_lines({"legs": legs}))
+    assert "Kombi</b> (6/6): 1 Reihe = 1 CHF · alle richtig ≈ 14 CHF" in text
+    assert "System 5/6</b>: 6 Reihen = 6 CHF · alle richtig ≈ 54 CHF · 1 Fehler ≈ 9 CHF" in text
+    assert "System 4/6</b>: 15 Reihen = 15 CHF · alle richtig ≈ 87 CHF · 1 Fehler ≈ 29 CHF · 2 Fehler ≈ 6 CHF" in text
+    assert telegram_bot.system_lines({"legs": legs[:3]}) == []
+
+
+def test_bilanz_counts_bot_tips_not_own_slips(engine):
+    from fussball import tracking
+    from fussball.data.db import session_scope
+
+    items = [{"match_id": i, "match": f"M{i}", "kickoff": None, "label": "x", "parts": [], "batch": b,
+              "title": "", "added": "", "won": w, "done": True, "reported": True}
+             for i, (b, w) in enumerate([("boost-1", True), ("boost-1", True), ("boost-2", True),
+                                         ("boost-2", False), ("slip-a", False)])]
+    with session_scope(engine) as s:
+        tracking._save(s, items)
+    sm = tracking.summary(engine)
+    assert sm == {"decided": 4, "won": 3, "boost_total": 2, "boost_won": 1}
+    text = telegram_bot.format_bilanz(sm)
+    assert "3 von 4" in text and "1 von 2" in text

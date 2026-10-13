@@ -15,7 +15,7 @@ from fussball.models.builder import Part, _mask
 
 log = logging.getLogger(__name__)
 KEY = "tracked_tips"
-MAX_ITEMS = 300
+MAX_ITEMS = 2000  # mit fester Datenbank: lange Bilanz
 
 
 def _load(s) -> list[dict]:
@@ -190,6 +190,20 @@ def fill_results(engine: Engine, client=None, limit: int = 12) -> int:
                 m.ht_home, m.ht_away = fs.ht_home, fs.ht_away
         filled += 1
     return filled
+
+
+def summary(engine: Engine) -> dict:
+    """Bilanz der Bot-Tipps (Top-Tipps und Boost-Kombis, ohne eigene Scheine)."""
+    with session_scope(engine) as s:
+        items = [i for i in _load(s) if not i.get("batch", "").startswith("slip")]
+    decided = [i for i in items if i["done"] and i["won"] is not None]
+    boosts: dict[str, list[dict]] = {}
+    for i in items:
+        if i.get("batch", "").startswith("boost"):
+            boosts.setdefault(i["batch"], []).append(i)
+    finished = {b: its for b, its in boosts.items() if all(i["done"] and i["won"] is not None for i in its)}
+    return {"decided": len(decided), "won": sum(bool(i["won"]) for i in decided),
+            "boost_total": len(finished), "boost_won": sum(all(i["won"] for i in its) for its in finished.values())}
 
 
 def stats(engine: Engine) -> dict:

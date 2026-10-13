@@ -271,6 +271,14 @@ async def _run_daily_locked(engine, loop) -> None:
         await telegram_bot.notify(_bot, telegram_bot.format_top5(plan), share=True)
         _track_top(engine, plan)
         sent = sent or bool(telegram_bot.top_tips(plan))
+    from fussball.agents import runner as _runner
+
+    legs = [lg for c in plan.get("boost_combos", [])[:3] for lg in c["legs"]]
+    unchecked = [lg for lg in legs if not (lg.get("agent") or {}).get("assessment")]
+    if legs and len(unchecked) == len(legs):  # keine einzige Prüfung: nie still verschweigen
+        await telegram_bot.notify(_bot, _runner.error_hint(_runner.LAST_ERROR.get("msg"))
+                                  if _runner.LAST_ERROR.get("msg") else
+                                  "⚠️ <b>Die Agenten haben heute nichts geprüft</b> (Tageslimit?) – Details: /status")
     errs = [t for t in plan.get("top") or [] if t.get("agent") == "fehler"]
     if errs:  # Fehler nie verschweigen
         await telegram_bot.notify(_bot, f"⚠️ <b>Agenten-Fehler bei {len(errs)} Spiel(en)</b>\n"

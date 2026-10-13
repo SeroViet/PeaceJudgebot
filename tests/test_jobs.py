@@ -321,3 +321,31 @@ def test_friends_get_tips_but_not_system_messages(monkeypatch):
     sent.clear()
     asyncio.run(telegram_bot.notify(app, "⚠️ Systemfehler"))
     assert sent == [1]  # Systemmeldungen nur an den Besitzer
+
+
+def test_owner_warned_when_agents_cannot_check(engine, monkeypatch):
+    import asyncio
+    from datetime import datetime, timedelta
+
+    from fussball.agents import runner
+    from fussball.app import jobs, state
+
+    day = datetime.now(state.TZ).date().isoformat()
+    kick = (datetime.now(state.TZ) + timedelta(hours=1)).astimezone(
+        __import__("zoneinfo").ZoneInfo("UTC")).replace(tzinfo=None).isoformat()
+    leg = {"match_id": 1, "match": "A – B", "kickoff": kick, "label": "Über 2.5 Tore", "market": "OU2.5",
+           "selection": "O", "prob": 0.6}
+    plan = {"top": [], "boost_combos": [{"day": day, "cat": "liga_eu", "legs": [leg], "prob": 0.6, "boost": True}]}
+    sent = []
+
+    async def notify(_bot, text, **_kw):
+        sent.append(text)
+
+    monkeypatch.setattr(telegram_bot, "notify", notify)
+    monkeypatch.setattr(state, "refresh", lambda engine, days=3, agents=False: {"agent": []})
+    monkeypatch.setattr(state, "load_plan", lambda: plan)
+    runner.note_error(RuntimeError("Your credit balance is too low to access the Anthropic API"))
+    asyncio.run(jobs.run_daily_now(engine))
+    assert any("Claude-Guthaben leer" in m for m in sent)
+    assert "Schlüssel ungültig" in runner.error_hint("AuthenticationError 401")
+    runner.LAST_ERROR.update(msg=None, at=None)

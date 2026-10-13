@@ -175,8 +175,9 @@ def fill_results(engine: Engine, client=None, limit: int = 12) -> int:
             break
         try:
             fs, cost = scout.final_score(client, match, date)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             log.exception("Endstand nicht ermittelt: %s", match)
+            runner.note_error(exc)
             continue
         runner.add_other_cost(engine, cost)
         if not fs.found or fs.ft_home is None or fs.ft_away is None:

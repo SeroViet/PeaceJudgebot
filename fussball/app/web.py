@@ -125,7 +125,10 @@ def create_app(engine=None, start_background: bool = True) -> FastAPI:
                 "daily_done": runner.daily_done(engine), "claude_spent": round(runner.spent_today(engine), 2),
                 "claude_budget": runner.daily_budget(), "running": st.get("running"),
                 "last_error": st.get("last_error"), "last_scan": st.get("last_scan"),
-                "tracking": __import__("fussball.tracking", fromlist=["stats"]).stats(engine)}
+                "tracking": __import__("fussball.tracking", fromlist=["stats"]).stats(engine),
+                "agent_error": runner.LAST_ERROR,
+                "boost_verdicts": [(lg.get("agent") or {}).get("assessment") or "ungeprüft"
+                                   for c in plan.get("boost_combos", [])[:1] for lg in c["legs"]]}
 
     @app.get("/robots.txt", response_class=PlainTextResponse)
     def robots():

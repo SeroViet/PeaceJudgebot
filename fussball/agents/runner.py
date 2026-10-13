@@ -24,6 +24,25 @@ def max_cost_per_match() -> float:
     return float(os.getenv("AGENT_MAX_COST_PER_MATCH", default))
 
 
+LAST_ERROR: dict = {"msg": None, "at": None}  # letzter Agenten-Fehler (für /diag und die Warnung an den Besitzer)
+
+
+def note_error(exc: Exception) -> None:
+    LAST_ERROR.update(msg=repr(exc)[:300], at=utcnow().isoformat(timespec="minutes"))
+
+
+def error_hint(msg: str | None) -> str:
+    """Verständliche Warnung zu einem Agenten-Fehler."""
+    m = (msg or "").lower()
+    if "credit balance" in m or "billing" in m or "insufficient" in m:
+        return "⚠️ <b>Claude-Guthaben leer</b> – bitte auf console.anthropic.com aufladen. Die Tipps sind heute ungeprüft (⚪)."
+    if "authentication" in m or "api key" in m or "401" in m:
+        return "⚠️ <b>Claude-Schlüssel ungültig</b> – ANTHROPIC_API_KEY in Render prüfen. Die Tipps sind heute ungeprüft (⚪)."
+    if "overloaded" in m or "529" in m or "rate" in m:
+        return "⚠️ <b>Claude ist gerade überlastet</b> – die Tipps sind teilweise ungeprüft (⚪). Mit /jetzt später nochmals prüfen."
+    return f"⚠️ <b>Die Agenten konnten nicht prüfen</b> – Tipps ungeprüft (⚪). Fehler: {msg}"
+
+
 def agent_budget() -> float:
     """Budget für die Tipp-Prüfung: Tageslimit minus Reserve fürs Nachschlagen der Ergebnisse
     (sonst kommt die 🟢/🔴-Meldung nicht, wenn die Agenten das Limit morgens aufbrauchen)."""
@@ -222,6 +241,7 @@ def analyze_legs(engine: Engine, legs: list[dict], client=None, max_age_h: float
                                     notes=[option_note(a) for a in leg.get("alternatives", [])] or None)
         except Exception as exc:  # noqa: BLE001 – ein Fehler darf die übrigen Spiele nicht stoppen
             log.exception("Scout fehlgeschlagen für %s", leg["match"])
+            note_error(exc)
             out.append({"match_id": leg["match_id"], "assessment": "fehler", "reason": repr(exc)[:200],
                         "text": f"⚠️ Analyse für {leg['match']} fehlgeschlagen.", "cached": False})
             continue
@@ -262,6 +282,7 @@ def check_tips(engine: Engine, items: list[dict], client=None, local_time=None, 
                     res.update(assessment=r.intel.tip_assessment, reason=r.intel.tip_reason)
                 except Exception as exc:  # noqa: BLE001
                     log.exception("Recherche ohne Spiel-ID fehlgeschlagen")
+                    note_error(exc)
                     res["reason"] = f"Prüfung fehlgeschlagen ({type(exc).__name__})"
             out.append(res)
             continue
@@ -286,6 +307,7 @@ def check_tips(engine: Engine, items: list[dict], client=None, local_time=None, 
                     res["reason"] = "Tageslimit erreicht – morgen wieder"
         except Exception as exc:  # noqa: BLE001
             log.exception("Tipp-Prüfung fehlgeschlagen")
+            note_error(exc)
             res["reason"] = f"Prüfung fehlgeschlagen ({type(exc).__name__})"
         out.append(res)
     return out
@@ -317,6 +339,7 @@ def challenge_tips(engine: Engine, items: list[dict], client=None, local_time=No
             res.update(assessment=j.tip_assessment, reason=j.tip_reason)
         except Exception as exc:  # noqa: BLE001
             log.exception("Gegenprüfung fehlgeschlagen für %s", it["match"])
+            note_error(exc)
             res["reason"] = f"Gegenprüfung fehlgeschlagen ({type(exc).__name__})"
         out.append(res)
     return out

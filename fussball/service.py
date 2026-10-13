@@ -615,7 +615,8 @@ COMBO_MARKETS = ("1X2", "DC", "OU1.5", "OU2.5", "OU3.5", "OU4.5", "BTTS", "HOME1
                  "H1_DC", "H1_OU0.5", "H1_OU1.5")  # Unter 4.5 nur in zähen Spielen (siehe profile_rules)
 # Keine Tipps wie "12 (kein Unentschieden)", "X" oder "Team unter …": wenig aussagekräftig
 EXCLUDED_TIPS = {("DC", "12"), ("1X2", "D"), ("OU4.5", "O"), ("HOME0.5", "U"), ("AWAY0.5", "U"),
-                 ("HOME0.5", "O"), ("AWAY0.5", "O"), ("OU0.5", "O"), ("OU0.5", "U"),  # keine 0.5-Linien („trifft“) ("HOME1.5", "U"), ("AWAY1.5", "U"),
+                 ("HOME0.5", "O"), ("AWAY0.5", "O"), ("OU0.5", "O"), ("OU0.5", "U"),  # keine 0.5-Linien („trifft“)
+                 ("HOME1.5", "U"), ("AWAY1.5", "U"),  # keine „Team unter …“-Tipps
                  ("H1_DC", "12"), ("H1_OU0.5", "U"), ("H1_OU1.5", "O")}
 MAX_SAME_TIP = 2  # höchstens 2× derselbe Tipp (z. B. "Über 1.5 Tore") pro Kombi
 # Tore-Tipps (Über/Unter, beide treffen) werden bevorzugt, solange sie nur wenig unsicherer sind

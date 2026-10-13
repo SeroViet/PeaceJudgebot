@@ -350,3 +350,10 @@ def test_no_team_to_score_tips_anywhere():
                       lam, mu, {}, {}, {}, None, None, 0.0, {}, implied=implied_markets(lam, mu), implied_rates=(lam, mu))
     labels = [t["label"] for t in safe_tips([f], 0.55, 0.95, per_match=5)]
     assert labels and not any("trifft" in x or "0.5" in x for x in labels)
+
+
+def test_no_team_under_tips():
+    from fussball.service import EXCLUDED_TIPS, RISKY_EXCLUDED
+
+    for tip in (("HOME1.5", "U"), ("AWAY1.5", "U"), ("HOME0.5", "O"), ("AWAY0.5", "O")):
+        assert tip in EXCLUDED_TIPS and tip in RISKY_EXCLUDED

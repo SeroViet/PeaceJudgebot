@@ -369,8 +369,12 @@ def api_key() -> str:
 def key_check() -> dict:
     """Prüfung ohne Geheimnis: ist der Schlüssel gesetzt und sieht er wie ein Anthropic-Schlüssel aus?"""
     raw, key = os.getenv("ANTHROPIC_API_KEY") or "", api_key()
+    kinds = {"sk-ant-api": "api (richtig)", "sk-ant-admin": "admin (falsch: Admin-Schlüssel)",
+             "sk-ant-oat": "oauth (falsch: Claude-Abo-Token)", "sk-ant-ort": "oauth (falsch: Claude-Abo-Token)",
+             "sk-": "fremd (falsch: z. B. OpenAI)"}
+    kind = next((v for k, v in kinds.items() if key.startswith(k)), "unbekannt (falsch)") if key else "fehlt"
     return {"set": bool(key), "length": len(key), "looks_ok": key.startswith("sk-ant-api") and len(key) > 90,
-            "cleaned": raw != key}
+            "kind": kind, "cleaned": raw != key}
 
 
 def make_client():

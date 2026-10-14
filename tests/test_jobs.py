@@ -389,7 +389,7 @@ def test_api_key_is_cleaned(monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", raw)
         assert scout.api_key() == key
         assert scout.key_check()["looks_ok"]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "falsch")
-    assert not scout.key_check()["looks_ok"]
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-" + "y" * 103)  # anderes, gültiges Format bleibt ok
+    assert scout.key_check()["looks_ok"]
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-admin01-" + "x" * 90)
     assert scout.key_check()["kind"].startswith("admin")

@@ -19,8 +19,8 @@ log = logging.getLogger(__name__)
 
 def max_cost_per_match() -> float:
     """Reserve vor jedem neu recherchierten Spiel (höchstens so viel kostet eines, gründliche Recherche mit
-    bis zu 6 Suchen): Opus ~0.60 $, Sonnet ~0.40 $."""
-    default = "0.4" if "sonnet" in scout.MODEL else "0.6"
+    bis zu 6 Suchen): Fable ~1.50 $, Opus ~0.60 $, Sonnet ~0.40 $."""
+    default = "0.4" if "sonnet" in scout.MODEL else "1.5" if "fable" in scout.MODEL else "0.6"
     return float(os.getenv("AGENT_MAX_COST_PER_MATCH", default))
 
 

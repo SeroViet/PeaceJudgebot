@@ -23,7 +23,8 @@ log = logging.getLogger(__name__)
 
 MODEL = os.getenv("AGENT_MODEL", "claude-opus-5-5")
 # USD pro 1M Tokens (Eingabe, Ausgabe) und pro Websuche; für die Budget-Kontrolle
-PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0), "claude-haiku-4-5": (1.0, 5.0)}
+PRICES = {"claude-fable-5-1": (10.0, 50.0), "claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0),
+          "claude-haiku-5-5": (0.1, 0.5), "claude-haiku-4-5": (1.0, 5.0)}
 WEB_SEARCH_USD = 0.01
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 

@@ -357,13 +357,29 @@ def final_score(client, match: str, date: str, model: str = MODEL) -> tuple[Fina
                                               ht_away=None), cost
 
 
+def api_key() -> str:
+    """ANTHROPIC_API_KEY bereinigt: Leerzeichen, Zeilenumbrüche, Anführungszeichen und ein mitkopiertes
+    „ANTHROPIC_API_KEY=“ werden entfernt (häufige Ursache für „invalid x-api-key“)."""
+    key = "".join((os.getenv("ANTHROPIC_API_KEY") or "").split())
+    if "=" in key and key.split("=", 1)[0].upper().endswith("API_KEY"):
+        key = key.split("=", 1)[1]
+    return key.strip("\"'`")
+
+
+def key_check() -> dict:
+    """Prüfung ohne Geheimnis: ist der Schlüssel gesetzt und sieht er wie ein Anthropic-Schlüssel aus?"""
+    raw, key = os.getenv("ANTHROPIC_API_KEY") or "", api_key()
+    return {"set": bool(key), "length": len(key), "looks_ok": key.startswith("sk-ant-api") and len(key) > 90,
+            "cleaned": raw != key}
+
+
 def make_client():
     """Anthropic-Client oder None, wenn keine Zugangsdaten konfiguriert sind."""
-    if not (os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")):
+    if not (api_key() or os.getenv("ANTHROPIC_AUTH_TOKEN")):
         return None
     import anthropic
 
-    return anthropic.Anthropic()
+    return anthropic.Anthropic(api_key=api_key() or None)
 
 
 def format_intel(match: str, tip: str, intel: MatchIntel) -> str:

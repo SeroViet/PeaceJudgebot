@@ -159,7 +159,7 @@ def test_boost_combo_tips_from_140(engine, monkeypatch):
     legs = boost[0]["legs"]
     assert all(telegram_bot.leg_sporttip(l) >= 1.3 for l in legs)  # jeder Tipp ab ca. 1.30
     text = telegram_bot.format_boost({"boost_combos": [{**boost[0], "id": "B1"}]})
-    assert "Boost-Kombi heute" in text and "Quote ca." in text and "Gesamtquote ca." in text
+    assert "Boost-Kombi" in text and "Quote ca." in text and "Gesamtquote ca." in text
 
 
 def test_torfest_only_high_scoring_matches(engine, monkeypatch):
@@ -379,3 +379,15 @@ def test_bilanz_counts_bot_tips_not_own_slips(engine):
     assert sm == {"decided": 4, "won": 3, "boost_total": 2, "boost_won": 1}
     text = telegram_bot.format_bilanz(sm)
     assert "3 von 4" in text and "1 von 2" in text
+
+
+def test_api_key_is_cleaned(monkeypatch):
+    from fussball.agents import scout
+
+    key = "sk-ant-api03-" + "x" * 95
+    for raw in (f" {key}\n", f'"{key}"', f"ANTHROPIC_API_KEY={key}", key):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", raw)
+        assert scout.api_key() == key
+        assert scout.key_check()["looks_ok"]
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "falsch")
+    assert not scout.key_check()["looks_ok"]

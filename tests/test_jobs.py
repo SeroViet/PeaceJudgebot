@@ -393,3 +393,18 @@ def test_api_key_is_cleaned(monkeypatch):
     assert scout.key_check()["looks_ok"]
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-admin01-" + "x" * 90)
     assert scout.key_check()["kind"].startswith("admin")
+
+
+def test_checked_boost_survives_refresh_without_agents():
+    from types import SimpleNamespace
+
+    from fussball import service
+
+    leg = lambda mid, a=None: {"match_id": mid, "label": "OU2.5 O", "prob": 0.65, **({"agent": a} if a else {})}
+    old = [{"day": "2026-10-15", "legs": [leg(1, {"assessment": "bestätigt", "reason": "ok"}), leg(2)]}]
+    plan = SimpleNamespace(boost_combos=[{"day": "2026-10-15", "legs": [leg(1), leg(3)]},
+                                         {"day": "2026-10-16", "legs": [leg(5)]}])
+    service.carry_boost(plan, old)
+    assert [c["day"] for c in plan.boost_combos] == ["2026-10-15", "2026-10-16"]
+    assert [lg["match_id"] for lg in plan.boost_combos[0]["legs"]] == [1, 2]  # die verschickte Kombi bleibt
+    assert plan.boost_combos[0]["legs"][0]["agent"]["assessment"] == "bestätigt"

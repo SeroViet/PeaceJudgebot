@@ -175,6 +175,8 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
                     # Boost-Kombi ist die 2. Tipp-Nachricht des Tages: beim Tageslauf immer prüfen
                     if agents:
                         info["agent"] += service.apply_agents_boost(engine, plan)
+                    else:
+                        service.carry_boost(plan, old.get("boost_combos", []))
                     continue
                 info["agent"] += service.apply_agents_risky(engine, plan, cached_only=not checked, kind=kind)
             except Exception as exc:  # noqa: BLE001

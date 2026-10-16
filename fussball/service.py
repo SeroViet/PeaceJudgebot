@@ -1171,10 +1171,12 @@ def carry_top_agents(plan: "DailyPlan", old_top: list[dict]) -> None:
 def carry_boost(plan: "DailyPlan", old_combos: list[dict]) -> None:
     """Ohne neuen Agentenlauf: die schon geprüfte Boost-Kombi eines Tages behalten (genau die verschickte,
     mit den Urteilen), statt sie ungeprüft neu zu bauen – sonst kämen ersetzte Spiele zurück."""
-    checked = {c["day"]: c for c in old_combos or [] if any(lg.get("agent") for lg in c["legs"])}
-    if checked:
-        plan.boost_combos = [c for c in plan.boost_combos if c["day"] not in checked] + list(checked.values())
-        plan.boost_combos.sort(key=lambda c: c["day"])
+    # pro Tag gibt es mehrere Boost-Kombis (eine je Ligen-Gruppe); verschickt wird die erste: alle in
+    # ihrer Reihenfolge behalten
+    days = {c["day"] for c in old_combos or [] if any(lg.get("agent") for lg in c["legs"])}
+    if days:
+        plan.boost_combos = sorted([c for c in plan.boost_combos if c["day"] not in days]
+                                   + [c for c in old_combos if c["day"] in days], key=lambda c: c["day"])
 
 
 def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,

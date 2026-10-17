@@ -76,6 +76,8 @@ _cost_lock = threading.Lock()  # Agenten laufen parallel: Kostenzähler nur nach
 def restore_carryover(engine: Engine, usd: float) -> None:
     """Nach einem Neustart: heute bereits ausgegebene Kosten (aus der angehefteten Telegram-Nachricht)
     wieder einrechnen, damit das Tageslimit über Neustarts hinweg gilt."""
+    if engine.dialect.name != "sqlite":
+        usd = 0.0  # dauerhafte Datenbank (Postgres) hat die Kosten schon – sonst zählt jeder Neustart doppelt
     with _cost_lock:
         v = other_costs_today(engine)
         v.update(usd=v["usd"] - v.get("carry", 0.0) + usd, carry=usd)

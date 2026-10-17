@@ -420,3 +420,20 @@ def test_agents_leave_reserve_for_results(monkeypatch):
     monkeypatch.setenv("RESULTS_RESERVE_USD", "0.4")
     assert runner.agent_budget() == pytest.approx(3.6)  # Agenten stoppen früher …
     assert runner.daily_budget() == 4.0  # … damit für die 🟢/🔴-Ergebnisse noch Geld da ist
+
+
+def test_restarts_do_not_inflate_costs_with_persistent_db(engine, monkeypatch):
+    monkeypatch.setattr(engine.dialect, "name", "postgresql")  # Neon: Kosten bleiben in der Datenbank
+    runner.add_other_cost(engine, 3.57)
+    for _ in range(3):  # mehrere Neustarts, die Pin-Nachricht zeigt jeweils den aktuellen Stand
+        runner.restore_carryover(engine, runner.parse_pin(runner.pin_text(engine)))
+    assert runner.spent_today(engine) == pytest.approx(3.57)
+    # schon aufgeblähter Zähler (alte Version) wird beim nächsten Neustart korrigiert
+    v = runner.other_costs_today(engine)
+    from fussball.data.db import session_scope
+    from fussball.data.schema import AppSetting
+
+    with session_scope(engine) as s:
+        s.get(AppSetting, "claude_other_costs").value = {**v, "usd": v["usd"] + 7.14, "carry": 7.14}
+    runner.restore_carryover(engine, 10.71)
+    assert runner.spent_today(engine) == pytest.approx(3.57)

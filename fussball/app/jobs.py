@@ -96,8 +96,14 @@ def _track_boost(engine, plan: dict) -> None:
         day = boost_day(plan.get("boost_combos", [])) or datetime.now(state.TZ).date().isoformat()
         combo = next((c for c in plan.get("boost_combos", []) if c["day"] == day), None)
         if combo:
-            tracking.track_tips(engine, combo["legs"], day, batch=f"boost-{day}",
-                                title=f"📋 <b>Ergebnis Boost-Kombi {day[8:10]}.{day[5:7]}.</b>")
+            # Kombi für einen späteren Tag (heute keine möglich): eigene Meldung, damit sie sich nicht mit
+            # der Kombi mischt, die an jenem Tag selbst verschickt wird
+            sent = datetime.now(state.TZ).date().isoformat()
+            batch, title = f"boost-{day}", f"📋 <b>Ergebnis Boost-Kombi {day[8:10]}.{day[5:7]}.</b>"
+            if day != sent:
+                batch += f"-vom-{sent}"
+                title = title.replace("</b>", f"</b> (verschickt am {sent[8:10]}.{sent[5:7]}.)")
+            tracking.track_tips(engine, combo["legs"], day, batch=batch, title=title)
     except Exception:  # noqa: BLE001
         log.exception("Boost-Kombi konnte nicht gemerkt werden")
 

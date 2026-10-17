@@ -410,3 +410,17 @@ def test_checked_boost_survives_refresh_without_agents():
     assert [c["day"] for c in plan.boost_combos] == ["2026-10-15", "2026-10-15", "2026-10-16"]
     assert [lg["match_id"] for lg in plan.boost_combos[0]["legs"]] == [1, 2]  # die verschickte Kombi bleibt
     assert plan.boost_combos[0]["legs"][0]["agent"]["assessment"] == "bestätigt"
+
+
+def test_boost_for_later_day_gets_own_result_message(engine, monkeypatch):
+    from datetime import datetime, timedelta
+
+    from fussball import tracking
+    from fussball.app import state
+
+    tomorrow = (datetime.now(state.TZ) + timedelta(days=1)).replace(hour=18, minute=0, second=0, microsecond=0)
+    legs = [{"match_id": i, "match": f"H{i} – A{i}", "kickoff": tomorrow.isoformat(), "label": "OU2.5 O",
+             "market": "OU2.5", "selection": "O", "prob": 0.65} for i in range(6)]
+    jobs._track_boost(engine, {"boost_combos": [{"day": tomorrow.date().isoformat(), "legs": legs}]})
+    (batch,) = tracking.stats(engine)["batches"]
+    assert batch.startswith(f"boost-{tomorrow.date().isoformat()}-vom-")

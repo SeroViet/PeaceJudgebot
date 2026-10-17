@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="de" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b0f14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/icon.svg">
+  <link rel="apple-touch-icon" href="/static/icon.svg">
+  <title>{% block title %}PeaceJudge{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="min-h-screen pb-24">
+  <header class="sticky top-0 z-10 border-b">
+    <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+      <a href="/" class="font-bold tracking-tight">⚽ PeaceJudge</a>
+      <div class="flex items-center gap-3 text-xs muted">
+        {% if status.running %}<span class="warn">⟳ aktualisiert …</span>
+        {% elif plan.generated_at %}<span>Stand {{ plan.generated_at | local }}</span>{% endif %}
+        <form method="post" action="/logout"><button class="underline">Logout</button></form>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-4 py-4 space-y-4">
+    {% block content %}{% endblock %}
+  </main>
+
+  <nav class="bottom fixed bottom-0 inset-x-0 border-t">
+    <div class="max-w-3xl mx-auto grid grid-cols-6 text-center text-[11px] py-2">
+      <a href="/" class="{{ 'active' if active == 'dashboard' }}">🏠<br>Tipps</a>
+      <a href="/kombi" class="{{ 'active' if active == 'kombi' }}">🧩<br>Kombi</a>
+      <a href="/alle" class="{{ 'active' if active == 'alle' }}">📋<br>Spiele</a>
+      <a href="/wetten" class="{{ 'active' if active == 'wetten' }}">🎟️<br>Wetten</a>
+      <a href="/bilanz" class="{{ 'active' if active == 'bilanz' }}">📈<br>Bilanz</a>
+      <a href="/einstellungen" class="{{ 'active' if active in ('einstellungen', 'modell', 'status') }}">⚙️<br>Mehr</a>
+    </div>
+  </nav>
+  <script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");</script>
+</body>
+</html>

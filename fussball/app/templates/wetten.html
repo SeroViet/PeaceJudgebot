@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-lg font-bold">Meine Wetten</h1>
+<form method="post" action="/wetten/neu" class="card p-3 grid grid-cols-4 gap-2 items-end text-xs">
+  <label class="muted">Tipp-Nr.<input name="tip_id" placeholder="z. B. 2 oder K1" required></label>
+  <label class="muted">Einsatz<input name="stake" type="number" step="0.5" required></label>
+  <label class="muted">Quote<input name="odds" type="number" step="0.01" required></label>
+  <button class="btn">Erfassen</button>
+</form>
+<div class="space-y-2">
+{% for b in items %}
+  {% if b.type == 'single' or b.stake > 0 %}
+  <div class="card p-3 text-sm">
+    <div class="flex justify-between text-xs muted">
+      <span>{{ 'Kombi ' ~ b.group if b.group else 'Einzel' }} · {{ b.kickoff | local }}</span>
+      <span class="{{ 'pos' if b.status == 'won' else 'neg' if b.status == 'lost' else 'warn' }}">
+        {{ {'open': 'offen', 'won': 'gewonnen', 'lost': 'verloren', 'void': 'ungültig'}[b.status] }}</span>
+    </div>
+    {% if b.group %}
+      {% for l in items if l.group == b.group %}
+      <div>{{ l.match }} · {{ l.selection | sel }}{% if l.market == 'OU' %} {{ l.line }}{% endif %}
+        <span class="muted text-xs">{{ l.score }}</span>
+        {% if l.status == 'won' %}✅{% elif l.status == 'lost' %}❌{% endif %}</div>
+      {% endfor %}
+    {% else %}
+      <div>{{ b.match }} · {{ b.selection | sel }}{% if b.market == 'OU' %} {{ b.line }}{% endif %} <span class="muted text-xs">{{ b.score }}</span></div>
+    {% endif %}
+    <div class="flex justify-between items-center mt-1 tabular text-xs">
+      <span>Einsatz {{ b.stake | money(plan.currency) }} @ {{ b.odds | odds }}</span>
+      <span>{% if b.pnl is not none %}<b class="{{ 'pos' if b.pnl > 0 else 'neg' }}">{{ b.pnl | money(plan.currency) }}</b>{% endif %}
+        {% if b.clv is not none %} · CLV {{ b.clv | pct }}{% endif %}</span>
+      <form method="post" action="/wetten/{{ b.id }}/loeschen" onsubmit="return confirm('Wette löschen?')"><button class="muted underline">löschen</button></form>
+    </div>
+  </div>
+  {% endif %}
+{% else %}
+  <div class="card p-4 text-sm muted">Noch keine Wetten erfasst. Tipps kannst du auf der Spiel- oder Kombi-Seite als „gesetzt“ markieren.</div>
+{% endfor %}
+</div>
+{% endblock %}

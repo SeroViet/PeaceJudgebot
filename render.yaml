@@ -2,5 +2,42 @@ services:
   - type: web
     name: pje-buybot
     env: python
+    plan: starter            # persistente Disk braucht einen bezahlten Plan
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python main.py"
+    healthCheckPath: /healthz
+    disk:
+      name: fussball-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: FUSSBALL_STORAGE_DIR
+        value: /var/data
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: TELEGRAM_OWNER_ID
+        sync: false
+      - key: APP_PASSWORD_HASH
+        sync: false
+      - key: APP_TOTP_SECRET
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: ODDS_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AGENT_DAILY_BUDGET_USD
+        value: "1.5"
+      - key: API_FOOTBALL_KEY
+        sync: false
+      - key: DAILY_REPORT_TIME
+        value: "09:00"
+      - key: REMINDER_MINUTES
+        value: "60"
+      - key: ODDS_API_INTERVAL_HOURS
+        value: "24"
+      - key: ODDS_API_DAILY_CREDITS
+        value: "16"

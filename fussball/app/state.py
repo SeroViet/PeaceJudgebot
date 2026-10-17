@@ -127,6 +127,9 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
     if not _lock.acquire(blocking=agents, timeout=3600 if agents else -1):
         return {"skipped": "läuft bereits"}
     _status["running"] = True
+    global _engine_for_plan
+    if engine is not None:
+        _engine_for_plan = engine  # vor load_plan: nach einem Neustart den letzten Plan aus der Datenbank lesen
     try:
         info = {}
         old = load_plan()
@@ -210,8 +213,6 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
         path = plan_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, default=service.np_default, ensure_ascii=False), encoding="utf-8")
-        global _engine_for_plan
-        _engine_for_plan = engine
         _plan_to_db(engine, data)
         try:
             service.prune_old_odds(engine)  # Datenbank klein halten (Gratis-Speicher)

@@ -424,3 +424,21 @@ def test_boost_for_later_day_gets_own_result_message(engine, monkeypatch):
     jobs._track_boost(engine, {"boost_combos": [{"day": tomorrow.date().isoformat(), "legs": legs}]})
     (batch,) = tracking.stats(engine)["batches"]
     assert batch.startswith(f"boost-{tomorrow.date().isoformat()}-vom-")
+
+
+def test_refresh_reads_last_plan_from_db_after_restart(engine, monkeypatch):
+    from fussball.app import state
+
+    seen = {}
+
+    def fake_load():
+        seen["engine"] = state._engine_for_plan
+        raise RuntimeError("stop")  # nur prüfen, ob der Plan aus der Datenbank lesbar wäre
+
+    monkeypatch.setattr(state, "_engine_for_plan", None)  # wie nach einem Neustart
+    monkeypatch.setattr(state, "load_plan", fake_load)
+    try:
+        state.refresh(engine, fetch=False)
+    except RuntimeError:
+        pass
+    assert seen["engine"] is engine

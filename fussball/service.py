@@ -347,6 +347,10 @@ def world_scan(engine: Engine, hours: float = 30.0, live: list[tuple[str, str]] 
                 Match.status == "scheduled", Match.source == "odds-api",
                 Match.kickoff_utc < utcnow() - timedelta(hours=2.5),
                 Match.kickoff_utc > utcnow() - timedelta(days=3)).distinct()).scalars().all()
+        # Endstände holt der Agent (2–4 Rappen pro Spiel, tracking.fill_results): Credits nur für Quoten,
+        # ausser ODDS_API_SCORES=1
+        if os.getenv("ODDS_API_SCORES", "0") != "1":
+            due = []
         reserve += 2 * min(len(due), 2)
 
         def can_spend(limit: int) -> bool:

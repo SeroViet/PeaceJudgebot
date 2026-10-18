@@ -456,3 +456,30 @@ def test_halftime_tip_decided_from_final_score_when_possible():
     assert part_won(Part("OU", "O", 0.5, "1h"), 2, 1, None, None) is None  # unklar ohne Halbzeitstand
     assert part_won(Part("BTTS", "Y", 0, "1h"), 3, 0, None, None) is False
     assert part_won(Part("OU", "O", 0.5, "1h"), 2, 1, 1, 0) is True
+
+
+def test_odds_credits_go_to_odds_not_scores(engine, monkeypatch):
+    from datetime import timedelta
+
+    from fussball import service
+    from fussball.data import odds_api
+    from fussball.data.db import session_scope
+    from fussball.data.schema import Competition, Match, Team, utcnow
+
+    class FakeClient:
+        configured, remaining = True, 70
+
+    with session_scope(engine) as s:  # offenes, vergangenes Spiel: früher wurden dafür Credits reserviert
+        c, h, a = Competition(code="soccer_epl", name="EPL"), Team(name="Scan H"), Team(name="Scan A")
+        s.add_all([c, h, a])
+        s.flush()
+        s.add(Match(competition_id=c.id, season="2026", kickoff_utc=utcnow() - timedelta(hours=5), home_team_id=h.id,
+                    away_team_id=a.id, status="scheduled", source="odds-api"))
+    monkeypatch.setattr(odds_api, "OddsApiClient", FakeClient)
+    monkeypatch.setattr(odds_api, "upcoming_counts", lambda client, hours: [
+        ("soccer_epl", "EPL", 8), ("soccer_spain_la_liga", "La Liga", 5), ("soccer_italy_serie_a", "Serie A", 5)])
+    monkeypatch.setattr(odds_api, "import_generic", lambda s, client, sport, title, use_history=True: 1)
+    monkeypatch.setattr(odds_api, "import_scores", lambda s, client, sport: 1)
+    monkeypatch.setattr(service, "daily_allowance", lambda remaining, spent: 6)
+    out = service.world_scan(engine)
+    assert list(out["fetched"]) == ["EPL", "La Liga", "Serie A"] and not out["scores"]  # 3 Ligen statt 1

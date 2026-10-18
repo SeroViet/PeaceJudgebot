@@ -56,6 +56,7 @@ class MatchIntel(BaseModel):
     home: TeamIntel
     away: TeamIntel
     goal_trend: str = Field(default="", description="Tore: Schnitt der letzten Spiele beider Teams (erzielt/kassiert), "
+                                                    "Heimbilanz des Heimteams und Auswärtsbilanz des Gastteams, "
                                                     "xG falls bekannt, direkte Duelle, Spielstil (offensiv/defensiv)")
     tip_assessment: Literal["bestätigt", "vorsicht", "streichen"]
     tip_reason: str = Field(description="Kurze Begründung, warum der Tipp bestätigt, riskant oder zu streichen ist")
@@ -105,6 +106,8 @@ Recherchiere mit der Websuche aktuelle, verlässliche Informationen zum genannte
 - Motivation: Tabellensituation, Bedeutung des Spiels, Trainerwechsel, Unruhe
 - Tore: erzielte und kassierte Tore der letzten 5 Spiele beider Teams, xG falls verfügbar,
   direkte Duelle, Spielstil (offensiv, defensiv, Konter)
+- Heim/Auswärts: Bilanz und Tore des Heimteams in seinen letzten Heimspielen und des Gastteams in seinen
+  letzten Auswärtsspielen (manche Teams sind zu Hause stark und auswärts schwach)
 - Schiedsrichter: wer pfeift, wie streng (Gelbe/Rote Karten, Elfmeter pro Spiel)
 - Wetter zum Anstoss (Regen, Sturm, Hitze, Schnee) und Rasen/Stadion (Kunstrasen, schlechter Platz,
   Platzgrösse – enger/kleiner Platz bremst, grosser Platz öffnet das Spiel –, Höhenlage, Heimstärke,

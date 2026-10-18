@@ -35,7 +35,8 @@ def _save(s, items: list[dict]) -> None:
 def _store(engine: Engine, new: list[dict]) -> int:
     with session_scope(engine) as s:
         items = _load(s)
-        kind = lambda i: i.get("batch", "").split("-")[0]  # noqa: E731 – top/boost/slip getrennt verfolgen
+        # Bot-Nachrichten je Meldung (batch) verfolgen, eigene Scheine (slip) nur einmal pro Tipp
+        kind = lambda i: "slip" if i.get("batch", "").startswith("slip") else i.get("batch", "")  # noqa: E731
         seen = {(kind(i), i["match_id"], i["label"]) for i in items}
         added = [n for n in new if (kind(n), n["match_id"], n["label"]) not in seen]
         _save(s, items + added)
@@ -102,10 +103,21 @@ def track_tips(engine: Engine, tips: list[dict], day: str, batch: str | None = N
     return _store(engine, new)
 
 
+def _half_from_final(p: Part, fh: int, fa: int) -> bool | None:
+    """Halbzeitstand unbekannt: manche Halbzeit-Tipps sind schon durch den Endstand entschieden
+    (zur Pause fallen nie mehr Tore als am Ende), z. B. „1. HZ Über 1.5“ bei Endstand 1:0 = verloren."""
+    goals = {"OU": fh + fa, "HOME": fh, "AWAY": fa}.get(p.market)
+    if goals is not None and goals < p.line:
+        return p.selection == "U"
+    if p.market == "BTTS" and min(fh, fa) == 0:
+        return p.selection == "N"
+    return None
+
+
 def part_won(p: Part, fh: int, fa: int, hh: int | None, ha: int | None) -> bool | None:
     if p.half == "1h":
         if hh is None or ha is None:
-            return None
+            return _half_from_final(p, fh, fa)
         return bool(_mask(p, np.array(hh), np.array(ha)))
     return bool(_mask(p, np.array(fh), np.array(fa)))
 
@@ -135,7 +147,9 @@ def fill_halftime(engine: Engine, client=None, limit: int = 6) -> int:
             break
         try:
             ht, cost = scout.halftime_score(client, match, date, final)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Halbzeitstand nicht ermittelt: %s", match)
+            runner.note_error(exc)
             continue
         runner.add_other_cost(engine, cost)
         fh, fa = (int(x) for x in final.split(":"))
@@ -235,8 +249,8 @@ def settle(engine: Engine) -> list[dict]:
             if m is None or m.status != "finished" or m.ft_home is None:
                 continue
             if m.ht_home is None and any(p[3] == "1h" for p in it["parts"]) and \
-                    m.kickoff_utc > utcnow() - timedelta(days=2):
-                continue  # Halbzeitstand fehlt noch – der Agent schlägt ihn nach
+                    m.kickoff_utc > utcnow() - timedelta(hours=12):
+                continue  # Halbzeitstand fehlt noch – der Agent schlägt ihn nach (danach ⚪, Meldung kommt)
             results = [part_won(Part(mk, sel, float(line), half), m.ft_home, m.ft_away, m.ht_home, m.ht_away)
                        for mk, sel, line, half in it["parts"]]
             it["won"] = None if None in results else all(results)

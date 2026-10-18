@@ -445,3 +445,14 @@ def test_refresh_reads_last_plan_from_db_after_restart(engine, monkeypatch):
     except RuntimeError:
         pass
     assert seen["engine"] is engine
+
+
+def test_halftime_tip_decided_from_final_score_when_possible():
+    from fussball.models.builder import Part
+    from fussball.tracking import part_won
+
+    assert part_won(Part("OU", "O", 1.5, "1h"), 1, 0, None, None) is False  # nur 1 Tor im ganzen Spiel
+    assert part_won(Part("OU", "U", 1.5, "1h"), 1, 0, None, None) is True
+    assert part_won(Part("OU", "O", 0.5, "1h"), 2, 1, None, None) is None  # unklar ohne Halbzeitstand
+    assert part_won(Part("BTTS", "Y", 0, "1h"), 3, 0, None, None) is False
+    assert part_won(Part("OU", "O", 0.5, "1h"), 2, 1, 1, 0) is True

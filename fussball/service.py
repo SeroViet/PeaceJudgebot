@@ -1033,7 +1033,9 @@ def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: i
 def build_mini(plan: "DailyPlan", skip: set[int] | None = None, now: datetime | None = None) -> list[dict]:
     """Schein des Tages (Mini-Kombi): wenige Spiele (mini_combo.sizes, Standard 3 oder 4, alle verschieden)
     mit Sporttip-Gesamtquote im Bereich (Standard ca. 2.8–3.6). Aus den sichersten Tipps des Tages wird die
-    Kombi mit der höchsten Chance gewählt; gibt es heute keine mehr, die von morgen."""
+    Kombi mit der höchsten Chance gewählt. Den Schein gibt es jeden Tag: reicht das nicht, wird der Bereich
+    schrittweise erweitert (mehr/weniger Spiele, etwas mutigere Tipps, Quote 2.5–4 bzw. 2–5) und zuletzt
+    die Kombi genommen, deren Quote am nächsten bei 3 liegt; gibt es heute gar nichts mehr, die von morgen."""
     from itertools import combinations
 
     from fussball.app.state import local
@@ -1041,24 +1043,48 @@ def build_mini(plan: "DailyPlan", skip: set[int] | None = None, now: datetime | 
     mc = plan.config.get("mini_combo", {})
     sizes = mc.get("sizes") or [mc.get("size", 3)]
     lo_odds, hi_odds = mc.get("min_odds", 2.0), mc.get("max_odds", 3.0)
+    target = (lo_odds + hi_odds) / 2
+    # (Anzahl Spiele, Chance pro Tipp von–bis, Gesamtquote von–bis); Stufe > 0 = Schein etwas weniger sicher
+    stages = [(sizes, mc.get("min_prob", 0.62), mc.get("max_prob", 0.85), lo_odds, hi_odds),
+              ([2, 3, 4, 5], 0.55, 0.92, 2.5, 4.0),
+              ([2, 3, 4, 5, 6], 0.48, 0.95, 2.0, 5.0)]
     now = now or utcnow()
     today = local(now.isoformat()).date()
     pool = [f for f in plan.all_forecasts or plan.forecasts if f.match_id not in (skip or set())]
+
+    def combo(day, chosen, stage):
+        chosen = sorted(chosen, key=lambda t: t["kickoff"])
+        p = float(np.prod([t["prob"] for t in chosen]))
+        return [{"day": day.isoformat(), "size": len(chosen), "legs": chosen, "prob": p, "fair_odds": 1 / p,
+                 "leg_min": min(t["prob"] for t in chosen), "mini": True, "risky": False, "cat": "mini",
+                 "stage": stage}]
+
+    def odds(legs) -> float:
+        return float(np.prod([SPORTTIP_FACTOR / t["prob"] for t in legs]))
+
     for day in (today, today + timedelta(days=1)):
-        legs = [t for t in best_tip_per_match(pool, mc.get("min_prob", 0.62), mc.get("max_prob", 0.85))
-                if local(t["kickoff"]).date() == day and datetime.fromisoformat(t["kickoff"]) > now]
-        legs = sorted(legs, key=lambda t: -t["prob"])[: mc.get("candidates", 14)]
-        best, best_p = None, 0.0
-        for size in sizes:  # möglichst wenige Spiele; mehr nur, wenn die Kombi dadurch sicherer wird
-            for trio in combinations(legs, size):
-                odds = float(np.prod([SPORTTIP_FACTOR / t["prob"] for t in trio]))
-                p = float(np.prod([t["prob"] for t in trio]))
-                if lo_odds <= odds <= hi_odds and p > best_p:
-                    best, best_p = trio, p
-        if best:
-            chosen = sorted(best, key=lambda t: t["kickoff"])
-            return [{"day": day.isoformat(), "size": len(chosen), "legs": chosen, "prob": best_p, "fair_odds": 1 / best_p,
-                     "leg_min": min(t["prob"] for t in chosen), "mini": True, "risky": False, "cat": "mini"}]
+        def tips(lo, hi):
+            out = [t for t in best_tip_per_match(pool, lo, hi)
+                   if local(t["kickoff"]).date() == day and datetime.fromisoformat(t["kickoff"]) > now]
+            return sorted(out, key=lambda t: -t["prob"])[: mc.get("candidates", 14)]
+
+        for stage, (ns, lo, hi, o_lo, o_hi) in enumerate(stages):
+            legs, best, best_p = tips(lo, hi), None, 0.0
+            for n in ns:  # möglichst wenige Spiele; mehr nur, wenn die Kombi dadurch sicherer wird
+                for trio in combinations(legs, n):
+                    p = float(np.prod([t["prob"] for t in trio]))
+                    if o_lo <= odds(trio) <= o_hi and p > best_p:
+                        best, best_p = trio, p
+            if best:
+                return combo(day, best, stage)
+        # letzter Ausweg: die Kombi (2–6 Spiele), deren Gesamtquote am nächsten bei ca. 3 liegt
+        legs = tips(0.40, 0.97)[:10]
+        trios = [t for n in range(2, 7) for t in combinations(legs, n)]
+        if trios:
+            return combo(day, min(trios, key=lambda t: (abs(odds(t) - target), -np.prod([x["prob"] for x in t]))),
+                         len(stages))
+        if len(legs) == 1:
+            return combo(day, legs, len(stages))
     return []
 
 

@@ -279,9 +279,9 @@ async def _run_daily_locked(engine, loop) -> None:
         await telegram_bot.notify(_bot, mini, share=True)
         _track_boost(engine, plan, "mini_combos", "Mini-Kombi")
         sent = True
-    if not sent and not safe_on():
-        await telegram_bot.notify(_bot, "ℹ️ Heute gibt es keinen sicheren Schein mit Gesamtquote ca. 3 – "
-                                  "lieber nichts spielen.", share=True)
+    if not sent and not safe_on():  # nur, wenn gar keine Spiele mit Quoten da sind (z. B. Quoten-API leer)
+        await telegram_bot.notify(_bot, "⚠️ <b>Heute kein Schein</b>: der Bot hat für heute und morgen keine Spiele "
+                                  "mit Quoten. Details: /status")
     if safe_on():  # sichere Einzeltipps nur auf Wunsch (DAILY_SAFE=1)
         await telegram_bot.notify(_bot, telegram_bot.format_top5(plan), share=True)
         _track_top(engine, plan)

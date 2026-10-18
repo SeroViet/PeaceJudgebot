@@ -246,7 +246,7 @@ def test_run_daily_now_sends_tips(engine, monkeypatch):
     monkeypatch.setattr(state, "refresh", lambda engine, days=3, agents=False: {"agent": []})
     monkeypatch.setattr(state, "load_plan", lambda: {"top": []})
     asyncio.run(jobs.run_daily_now(engine))
-    assert sent == ["ℹ️ Heute gibt es keinen sicheren Schein mit Gesamtquote ca. 3 – lieber nichts spielen."]
+    assert len(sent) == 1 and "keine Spiele mit Quoten" in sent[0]  # ohne Daten: Warnung statt Stille
     assert not runner.daily_done(engine)  # keine Tipps → nicht erledigt, ein Neustart versucht es nochmals
     assert not jobs.daily_running()
 
@@ -534,7 +534,14 @@ def test_mini_kombi_three_safest_with_total_odds_2_to_3():
     # die sicherste Dreier-Kombi, die noch auf Quote 2 kommt (nicht einfach die drei sichersten: Quote zu tief)
     assert combo["prob"] == max(a * b * c for a, b, c in __import__("itertools").combinations(
         [0.84, 0.82, 0.80, 0.74, 0.72, 0.70, 0.64], 3) if 2.0 <= (0.93 / a) * (0.93 / b) * (0.93 / c) <= 3.0)
-    assert service.build_mini(_mini_plan([0.84, 0.82], now), now=now) == []  # zu wenige Spiele: keine
+    assert combo["stage"] == 0
+    # nur 2 Spiele da: trotzdem ein Schein (etwas mutiger, im Text markiert) – es gibt jeden Tag Tipps
+    (few,) = service.build_mini(_mini_plan([0.84, 0.62], now), now=now)
+    assert few["size"] == 2 and few["stage"] > 0
+    text = telegram_bot.format_boost({"mini_combos": [{**few, "day": "2999-01-01"}]}, "mini_combos",
+                                     telegram_bot.MINI_TITLE)
+    assert "etwas mutiger" in text
+    assert service.build_mini(_mini_plan([], now), now=now) == []  # gar keine Spiele: kein Schein
 
 
 def test_mini_kombi_agents_replace_warned_games(engine, monkeypatch):

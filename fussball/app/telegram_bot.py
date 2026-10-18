@@ -452,6 +452,9 @@ def format_boost(plan: dict, key: str = "boost_combos",
                    f" · Chance {c['prob']:.0%}</i>")
         if c.get("boost") and not all_150:
             out.append("<i>ℹ️ Tipps unter 1.50 dabei → ohne Sporttip-KombiBoost.</i>")
+        if c.get("stage"):  # Schein des Tages mit erweitertem Bereich: ehrlich sagen
+            out.append("<i>⚠️ Heute gab es nicht genug sehr sichere Tipps – dieser Schein ist etwas mutiger, "
+                       "lieber kleiner Einsatz.</i>")
     if checked_kind:
         out.append("\n<i>💡 Als normale Kombi spielen (keine Systemwette) · nur kleiner Einsatz.</i>")
     return "\n".join(out)
@@ -791,7 +794,7 @@ def build(engine) -> Application | None:
 
     async def cmd_mini(update: Update, _ctx):
         await reply(update, format_mini(state.load_plan())
-                    or "Heute und morgen kein sicherer Schein mit Gesamtquote ca. 3 möglich – lieber nichts spielen.")
+                    or "Noch kein Schein: für heute und morgen sind keine Spiele mit Quoten da. Details: /status")
 
     async def cmd_torfest(update: Update, _ctx):
         plan = state.load_plan()

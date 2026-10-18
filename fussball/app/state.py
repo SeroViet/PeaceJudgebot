@@ -177,7 +177,9 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
                 if kind == "boost" and os.getenv("DAILY_BOOST", "1") == "1":
                     # Boost-Kombi ist die 2. Tipp-Nachricht des Tages: beim Tageslauf immer prüfen
                     if agents:
-                        info["agent"] += service.apply_agents_boost(engine, plan)
+                        res = service.apply_agents_boost(engine, plan)
+                        info["agent"] += res
+                        info["boost_warned"] = sum(r.get("assessment") in ("vorsicht", "streichen") for r in res)
                     else:
                         service.carry_boost(plan, old.get("boost_combos", []))
                     continue
@@ -196,6 +198,11 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
             for leg in c["legs"]:
                 leg["sporttip_est"] = slip.estimate(table, leg["market"], 1 / leg["prob"])
         data = serialize_plan(plan)
+        try:  # Zahlen für /diag: warum hat die Boost-Kombi so viele Spiele
+            data["boost_note"] = {**service.boost_stats(plan),
+                                  "warned": info.get("boost_warned", (old.get("boost_note") or {}).get("warned"))}
+        except Exception:  # noqa: BLE001
+            log.exception("Boost-Zahlen nicht berechnet")
         service.record_served(engine, plan.day_combos)
         info["combo_results"] = service.evaluate_served(engine)
         from fussball import tracking

@@ -158,6 +158,9 @@ def test_boost_combo_tips_from_140(engine, monkeypatch):
     assert all(0.60 <= l["prob"] <= 0.71 for l in boost[0]["legs"])
     legs = boost[0]["legs"]
     assert all(telegram_bot.leg_sporttip(l) >= 1.3 for l in legs)  # jeder Tipp ab ca. 1.30
+    plan.boost_combos = boost
+    note = service.boost_stats(plan)
+    assert note["size"] == boost[0]["size"] and note["matches_with_odds"] >= note["tips_ab_1_30"] >= note["size"]
     text = telegram_bot.format_boost({"boost_combos": [{**boost[0], "id": "B1"}]})
     assert "Boost-Kombi" in text and "Quote ca." in text and "Gesamtquote ca." in text
 

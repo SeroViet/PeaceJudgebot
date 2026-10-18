@@ -128,6 +128,7 @@ def create_app(engine=None, start_background: bool = True) -> FastAPI:
                 "last_error": st.get("last_error"), "last_scan": st.get("last_scan"),
                 "tracking": __import__("fussball.tracking", fromlist=["stats"]).stats(engine),
                 "agent_error": runner.LAST_ERROR,
+                "boost_note": plan.get("boost_note"),
                 "claude_key": __import__("fussball.agents.scout", fromlist=["key_check"]).key_check(),
                 "boost_verdicts": [(lg.get("agent") or {}).get("assessment") or "ungeprüft"
                                    for c in plan.get("boost_combos", [])[:1] for lg in c["legs"]]}

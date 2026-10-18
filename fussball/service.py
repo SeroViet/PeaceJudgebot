@@ -1020,6 +1020,24 @@ def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: i
     return list(done.values())
 
 
+def boost_stats(plan: "DailyPlan", now: datetime | None = None) -> dict:
+    """Zahlen für /diag (ohne Tipps): warum hat die Boost-Kombi so viele Spiele, wie sie hat?"""
+    from fussball.app.state import local
+
+    now = now or utcnow()
+    day = boost_day(plan.boost_combos, now) or local(now.isoformat()).date().isoformat()
+    bc = plan.config.get("boost_combo", {})
+    pool = [f for f in plan.all_forecasts or plan.forecasts
+            if local(f.kickoff_utc.isoformat()).date().isoformat() == day and f.kickoff_utc > now]
+
+    def tips(lo: float) -> int:
+        return len(best_tip_per_match(pool, lo, bc.get("max_prob", 0.71), BOOST_MARKETS, exclude=RISKY_EXCLUDED))
+
+    legs = next((c["legs"] for c in plan.boost_combos if c["day"] == day), [])
+    return {"day": day, "matches_with_odds": len(pool), "tips_ab_1_30": tips(bc.get("min_prob", 0.60)),
+            "tips_notfall": tips(0.50), "size": len(legs)}
+
+
 def boost_day(combos: list[dict], now: datetime | None = None) -> str | None:
     """Tag der Boost-Kombi, die verschickt wird: heute, sonst der nächste Tag mit einer Boost-Kombi."""
     from fussball.app.state import local

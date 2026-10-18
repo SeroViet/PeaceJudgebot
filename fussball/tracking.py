@@ -210,7 +210,15 @@ def stats(engine: Engine) -> dict:
     """Für /diag: wie viele Tipps verfolgt, offen, abgerechnet, gemeldet."""
     with session_scope(engine) as s:
         items = _load(s)
-    return {"tracked": len(items), "open": sum(not i["done"] for i in items),
+        late: dict[str, int] = {}  # offene Tipps, deren Spiel längst vorbei ist: woran hängt es?
+        for i in items:
+            m = None if i["done"] else s.get(Match, i["match_id"])
+            if m is None or m.kickoff_utc > utcnow() - timedelta(hours=3):
+                continue
+            why = ("kein Endstand" if m.status != "finished" or m.ft_home is None else
+                   "kein Halbzeitstand" if m.ht_home is None else "nicht abgerechnet")
+            late[why] = late.get(why, 0) + 1
+    return {"tracked": len(items), "open": sum(not i["done"] for i in items), "late": late,
             "done": sum(i["done"] for i in items), "reported": sum(bool(i.get("reported")) for i in items),
             "batches": sorted({i.get("batch", "") for i in items})[-5:]}
 

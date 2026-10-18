@@ -544,7 +544,8 @@ def test_mini_kombi_agents_replace_warned_games(engine, monkeypatch):
     from fussball.data.schema import utcnow
 
     now = utcnow()
-    plan = _mini_plan([0.80, 0.76, 0.74, 0.72, 0.70], now)
+    # alle Spiele morgen Nachmittag (gleicher Tag, egal wann der Test läuft)
+    plan = _mini_plan([0.80, 0.76, 0.74, 0.72, 0.70], (now + timedelta(days=1)).replace(hour=10, minute=0))
     plan.mini_combos = service.build_mini(plan, now=now)
     first = [lg["match_id"] for lg in plan.mini_combos[0]["legs"]]
     bad = first[0]
@@ -587,3 +588,25 @@ def test_daily_sends_mini_kombi_and_tracks_it(engine, monkeypatch):
     mini = next(m for m in sent if "Mini-Kombi" in m)
     assert mini.count("🟢") == 3 and "Gesamtquote ca." in mini
     assert f"mini-{day}" in tracking.stats(engine)["batches"]
+
+
+def test_agents_show_referee_weather_pitch():
+    from fussball.agents import scout
+
+    team = lambda n, missing: scout.TeamIntel(team=n, missing=missing, yellow_card_risk=[],  # noqa: E731
+                                              lineup_confirmed=False, expected_lineup=[], formation=None,
+                                              fatigue="", motivation="")
+    intel = scout.MatchIntel(
+        home=team("Thun", [scout.MissingPlayer(name="Bürki", position="Sturm", status="fällt aus",
+                                               reason="Knie", key_player=True)]),
+        away=team("Schaffhausen", []), tip_assessment="bestätigt", tip_reason="ok", summary="", sources=[],
+        referee="Sandro Schärer (4.2 Gelbe/Spiel)", weather="Regen, 9 °C", pitch="unbekannt")
+    line = scout.facts_line(intel)
+    assert "Fehlen: Bürki" in line and "Schärer" in line and "Regen" in line and "unbekannt" not in line
+    old = {k: v for k, v in intel.model_dump().items() if k not in ("referee", "weather", "pitch")}
+    assert scout.MatchIntel.model_validate(old).referee == ""  # gespeicherte Berichte von früher bleiben lesbar
+    leg = {"match_id": 1, "match": "Schaffhausen – Thun", "kickoff": "2026-10-18T14:00:00", "label": "Über 1.5 Tore",
+           "prob": 0.75, "agent": {"assessment": "bestätigt", "reason": "", "facts": line}}
+    text = telegram_bot.format_boost({"mini_combos": [{"day": "2999-01-01", "legs": [leg], "prob": 0.75}]},
+                                     "mini_combos", telegram_bot.MINI_TITLE)
+    assert "👨‍⚖️ Sandro Schärer" in text and "🌦️ Regen" in text

@@ -63,6 +63,23 @@ class MatchIntel(BaseModel):
     sources: list[str] = Field(description="URLs der wichtigsten Quellen")
     best_tip: str | None = Field(default=None, description="Aus der Liste der möglichen Tipps genau der Text des "
                                                             "Tipps, den die Fakten am besten stützen; sonst null")
+    referee: str = Field(default="", description="Schiedsrichter (Name) und seine Linie: Gelbe/Rote Karten und "
+                                                 "Elfmeter pro Spiel, falls bekannt; sonst 'unbekannt'")
+    weather: str = Field(default="", description="Wetter zum Anstoss: Regen, Wind, Hitze, Kälte, Schnee; sonst "
+                                                 "'unbekannt'")
+    pitch: str = Field(default="", description="Rasen/Stadion: Naturrasen oder Kunstrasen, Zustand, Höhenlage, "
+                                               "Heimstärke, Zuschauer, Derby; sonst 'unbekannt'")
+
+
+def facts_line(intel: "MatchIntel") -> str:
+    """Eine kurze Zeile für Telegram: wichtigste Ausfälle, Schiedsrichter, Wetter, Rasen."""
+    missing = [m.name for t in (intel.home, intel.away) for m in t.missing if m.key_player and m.status != "fraglich"]
+    known = lambda s: s and s.strip().lower() not in ("unbekannt", "-", "n/a", "keine angabe")  # noqa: E731
+    parts = ([f"Fehlen: {', '.join(missing[:4])}"] if missing else []) + \
+        [f"{icon} {text.strip()}" for icon, text in (("👨‍⚖️", intel.referee), ("🌦️", intel.weather),
+                                                      ("🏟️", intel.pitch)) if known(text)]
+    line = " · ".join(parts)
+    return line if len(line) <= 220 else line[:217] + "…"
 
 
 @dataclass
@@ -87,7 +104,10 @@ Recherchiere mit der Websuche aktuelle, verlässliche Informationen zum genannte
   Reisen, angekündigte Rotation
 - Motivation: Tabellensituation, Bedeutung des Spiels, Trainerwechsel, Unruhe
 - Tore: erzielte und kassierte Tore der letzten 5 Spiele beider Teams, xG falls verfügbar,
-  direkte Duelle, Spielstil (offensiv, defensiv, Konter), Wetter/Platz falls auffällig
+  direkte Duelle, Spielstil (offensiv, defensiv, Konter)
+- Schiedsrichter: wer pfeift, wie streng (Gelbe/Rote Karten, Elfmeter pro Spiel)
+- Wetter zum Anstoss (Regen, Sturm, Hitze, Schnee) und Rasen/Stadion (Kunstrasen, schlechter Platz,
+  Höhenlage, Heimstärke, Zuschauer, Derby)
 Suche auch in der Landessprache der Teams (z. B. Deutsch, Englisch, Italienisch, Spanisch,
 Französisch). Bevorzuge offizielle Vereinsseiten, Pressekonferenzen und grosse Sportmedien.
 Gehe mit den Suchen sparsam um: suche zuerst nach einer Vorschau mit Team-News für beide Teams
@@ -103,6 +123,11 @@ Steht bei den Tipps eine geschätzte Sporttip-Quote, gilt: Wenn mehrere Tipps vo
 gestützt werden, nimm den mit dem besten Verhältnis Sporttip-Quote zu fairer Quote (bester Wert).
 Die Fakten haben aber immer Vorrang – nie einen Tipp nur wegen der Quote wählen.
 Nenne keine eigenen Wahrscheinlichkeiten und keine Quoten.
+
+Schiedsrichter, Wetter und Rasen: Starker Regen, Sturm oder ein schwerer/schlechter Platz bremsen das Spiel
+(eher weniger Tore, Zufallstore möglich) – ein Grund zur Vorsicht bei Über-Tipps. Ein strenger Schiedsrichter
+mit vielen Elfmetern oder Roten Karten macht Spiele unberechenbarer (wichtig bei Unter- und Sieg-Tipps).
+Kunstrasen und Höhenlage stärken das Heimteam. Trage diese Angaben in referee, weather und pitch ein.
 
 Bei Unter-Tipps (z. B. "Unter 3.5 / 4.5 Tore") prüfe besonders: Muss ein Team unbedingt gewinnen
 oder aufholen (offenes Spiel)? Kehren Torjäger zurück? Fehlen Stammverteidiger oder der Stammtorhüter?

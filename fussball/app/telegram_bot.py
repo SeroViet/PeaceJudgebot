@@ -445,7 +445,8 @@ def format_boost(plan: dict, key: str = "boost_combos",
             out.append(f"<b>{state.local(l['kickoff']).strftime('%H:%M')} {l['match']}</b>\n"
                        f"➡️ {tip(l['label'])} · {l['prob']:.0%} · Quote ca. {leg_sporttip(l):.2f}{mark}"
                        + (f"\n<i>🔴 {html.escape(a['reason'])}</i>"
-                          if a.get("assessment") in ("vorsicht", "streichen") and a.get("reason") else ""))
+                          if a.get("assessment") in ("vorsicht", "streichen") and a.get("reason") else "")
+                       + (f"\n<i>ℹ️ {html.escape(a['facts'])}</i>" if a.get("facts") else ""))
         all_150 = all(leg_sporttip(lg) >= 1.5 for lg in c["legs"])
         out.append(f"<i>Gesamtquote ca. {sporttip_odds(c):.1f}{' + KombiBoost' if c.get('boost') and all_150 else ''}"
                    f" · Chance {c['prob']:.0%}</i>")

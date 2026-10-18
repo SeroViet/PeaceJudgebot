@@ -1006,11 +1006,12 @@ def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: i
             if ok and os.getenv("AGENT_CHALLENGE", "1") == "1":
                 for leg, c in zip(ok, runner.challenge_tips(engine, ok, client=client, local_time=local)):
                     if c.get("assessment") in ("vorsicht", "streichen"):
-                        done[leg["match_id"]] = c
+                        done[leg["match_id"]] = {**c, "facts": done[leg["match_id"]].get("facts", "")}
         for leg in combos[0]["legs"]:
             r = done.get(leg["match_id"]) or {}
             if r.get("assessment"):
-                leg["agent"] = {"assessment": r["assessment"], "reason": r.get("reason", "")}
+                leg["agent"] = {"assessment": r["assessment"], "reason": r.get("reason", ""),
+                                **({"facts": r["facts"]} if r.get("facts") else {})}
         bad = {mid for mid, r in done.items() if r.get("assessment") in ("vorsicht", "streichen")}
         if not bad - skip:
             break
@@ -1024,7 +1025,8 @@ def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: i
         for leg in c["legs"]:
             r = done.get(leg["match_id"]) or {}
             if r.get("assessment") and "agent" not in leg:
-                leg["agent"] = {"assessment": r["assessment"], "reason": r.get("reason", "")}
+                leg["agent"] = {"assessment": r["assessment"], "reason": r.get("reason", ""),
+                                **({"facts": r["facts"]} if r.get("facts") else {})}
     return list(done.values())
 
 

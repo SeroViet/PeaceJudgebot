@@ -281,7 +281,8 @@ def check_tips(engine: Engine, items: list[dict], client=None, local_time=None, 
                                           it.get("comp") or "", it["label"], "Keine Daten aus unserer Datenbank.",
                                           max_searches=int(os.getenv("AGENT_MAX_SEARCHES", "6")))
                     add_other_cost(engine, r.cost_usd)
-                    res.update(assessment=r.intel.tip_assessment, reason=r.intel.tip_reason)
+                    res.update(assessment=r.intel.tip_assessment, reason=r.intel.tip_reason,
+                               facts=scout.facts_line(r.intel))
                 except Exception as exc:  # noqa: BLE001
                     log.exception("Recherche ohne Spiel-ID fehlgeschlagen")
                     note_error(exc)
@@ -307,6 +308,10 @@ def check_tips(engine: Engine, items: list[dict], client=None, local_time=None, 
                     res.update(assessment=r[0]["assessment"], reason=r[0]["reason"])
                 else:
                     res["reason"] = "Tageslimit erreicht – morgen wieder"
+            if res["assessment"]:  # Schiedsrichter, Wetter, Rasen, Ausfälle zum Anzeigen
+                rep = recent_report(engine, it["match_id"], max_age_h)
+                if rep is not None:
+                    res["facts"] = scout.facts_line(scout.MatchIntel.model_validate(rep.data))
         except Exception as exc:  # noqa: BLE001
             log.exception("Tipp-Prüfung fehlgeschlagen")
             note_error(exc)

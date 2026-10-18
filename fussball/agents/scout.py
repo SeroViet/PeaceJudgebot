@@ -67,8 +67,8 @@ class MatchIntel(BaseModel):
                                                  "Elfmeter pro Spiel, falls bekannt; sonst 'unbekannt'")
     weather: str = Field(default="", description="Wetter zum Anstoss: Regen, Wind, Hitze, Kälte, Schnee; sonst "
                                                  "'unbekannt'")
-    pitch: str = Field(default="", description="Rasen/Stadion: Naturrasen oder Kunstrasen, Zustand, Höhenlage, "
-                                               "Heimstärke, Zuschauer, Derby; sonst 'unbekannt'")
+    pitch: str = Field(default="", description="Rasen/Stadion: Naturrasen oder Kunstrasen, Zustand, Platzgrösse "
+                                               "(eng/gross), Höhenlage, Heimstärke, Zuschauer, Derby; sonst 'unbekannt'")
 
 
 def facts_line(intel: "MatchIntel") -> str:
@@ -107,7 +107,10 @@ Recherchiere mit der Websuche aktuelle, verlässliche Informationen zum genannte
   direkte Duelle, Spielstil (offensiv, defensiv, Konter)
 - Schiedsrichter: wer pfeift, wie streng (Gelbe/Rote Karten, Elfmeter pro Spiel)
 - Wetter zum Anstoss (Regen, Sturm, Hitze, Schnee) und Rasen/Stadion (Kunstrasen, schlechter Platz,
-  Höhenlage, Heimstärke, Zuschauer, Derby)
+  Platzgrösse – enger/kleiner Platz bremst, grosser Platz öffnet das Spiel –, Höhenlage, Heimstärke,
+  Zuschauer/Geisterspiel, Derby)
+- Alles Weitere, was das Spiel beeinflusst: lange Anreise/Zeitverschiebung, Anstosszeit (Hitze am Mittag),
+  Trainer gesperrt oder neu, Spielplan danach (Rotation vor einem wichtigen Spiel), Unruhe im Verein
 Suche auch in der Landessprache der Teams (z. B. Deutsch, Englisch, Italienisch, Spanisch,
 Französisch). Bevorzuge offizielle Vereinsseiten, Pressekonferenzen und grosse Sportmedien.
 Gehe mit den Suchen sparsam um: suche zuerst nach einer Vorschau mit Team-News für beide Teams

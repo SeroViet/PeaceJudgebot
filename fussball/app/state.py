@@ -189,7 +189,7 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
             scope = os.getenv("AGENT_COMBOS", "T").upper()
             checked = agents and letter in scope
             try:
-                if kind == "boost" and os.getenv("DAILY_BOOST", "1") == "1":
+                if kind == "boost" and os.getenv("DAILY_BOOST", "0") == "1":
                     # Boost-Kombi ist die 2. Tipp-Nachricht des Tages: beim Tageslauf immer prüfen
                     if agents:
                         res = service.apply_agents_boost(engine, plan)

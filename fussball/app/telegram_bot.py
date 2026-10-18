@@ -457,7 +457,7 @@ def format_boost(plan: dict, key: str = "boost_combos",
     return "\n".join(out)
 
 
-MINI_TITLE = "🛡️ <b>Mini-Kombi heute</b> (3 sehr sichere Tipps, Gesamtquote ca. 2–3)"
+MINI_TITLE = "🎯 <b>Schein heute</b> (wenige, sehr sichere Tipps · Gesamtquote ca. 3)"
 
 
 def format_mini(plan: dict) -> str:
@@ -642,7 +642,7 @@ def format_stats(engine) -> str:
 
 COMMANDS = [
     ("boost", "Boost-Kombi von heute (8 Tipps ab Quote 1.30)"),
-    ("mini", "Mini-Kombi von heute (3 sehr sichere Tipps, Gesamtquote 2–3)"),
+    ("mini", "Schein von heute (wenige, sehr sichere Tipps, Gesamtquote ca. 3)"),
     ("top5", "Die 5–6 sichersten Tipps von heute, vom Scout geprüft"),
     ("tageskombi", "Sichere 3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("ergebnisse", "Bilanz + letzte Tipps: 🟢 gewonnen / 🔴 verloren"),
@@ -703,7 +703,7 @@ def build(engine) -> Application | None:
             return
         await reply(update, "👋 PeaceJudge ist bereit.\n/top5 – die sichersten Tipps von heute\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/tageskombi – 3er- und 5er-Kombi, alle Spiele am selben Tag\n"
-                            "/boost – Boost-Kombi: 8 Tipps ab Quote 1.30\n/mini – Mini-Kombi: 3 sehr sichere Tipps, Gesamtquote 2–3\n"
+                            "/boost – Boost-Kombi: 8 Tipps ab Quote 1.30\n/mini – Schein von heute: wenige, sehr sichere Tipps, Gesamtquote ca. 3\n"
                             "/torfest – 1. Halbzeit Über 1.5 in den torreichsten Spielen\n"
                             "/risiko – Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8\n"
                             "/krass – Krass-Kombi: 3 BetBuilder, Quote ca. 8–25\n"
@@ -791,7 +791,7 @@ def build(engine) -> Application | None:
 
     async def cmd_mini(update: Update, _ctx):
         await reply(update, format_mini(state.load_plan())
-                    or "Keine Mini-Kombi möglich (keine 3 sicheren Tipps mit Gesamtquote 2–3 heute oder morgen).")
+                    or "Heute und morgen kein sicherer Schein mit Gesamtquote ca. 3 möglich – lieber nichts spielen.")
 
     async def cmd_torfest(update: Update, _ctx):
         plan = state.load_plan()
@@ -837,7 +837,7 @@ def build(engine) -> Application | None:
                     + ("" if ok == len(friends) else " Wer sie nicht bekam, muss den Bot zuerst mit /start öffnen."))
 
     async def cmd_now(update: Update, _ctx):
-        """/jetzt: Agenten-Prüfung sofort starten und 6 Tipps schicken (Tageslimit gilt weiter)."""
+        """/jetzt: Agenten-Prüfung sofort starten und den Schein schicken (Tageslimit gilt weiter)."""
         import asyncio
 
         from fussball.app import jobs
@@ -845,6 +845,7 @@ def build(engine) -> Application | None:
         if jobs.daily_running():
             await reply(update, "⏳ Die Agenten prüfen gerade schon – die Tipps kommen gleich.")
             return
+        await reply(update, "🔎 Die Agenten prüfen jetzt – der Schein kommt in ca. 10–20 Minuten.")
         asyncio.get_running_loop().create_task(jobs.run_daily_now(engine))
 
     async def cmd_costs(update: Update, _ctx):

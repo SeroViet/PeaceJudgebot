@@ -246,12 +246,12 @@ def test_run_daily_now_sends_tips(engine, monkeypatch):
     monkeypatch.setattr(state, "refresh", lambda engine, days=3, agents=False: {"agent": []})
     monkeypatch.setattr(state, "load_plan", lambda: {"top": []})
     asyncio.run(jobs.run_daily_now(engine))
-    assert "Agenten prüfen jetzt" in sent[0] and "keine Boost-Kombi" in sent[1] and "Heute keine Tipps" in sent[2]
+    assert sent == ["ℹ️ Heute gibt es keinen sicheren Schein mit Gesamtquote ca. 3 – lieber nichts spielen."]
     assert not runner.daily_done(engine)  # keine Tipps → nicht erledigt, ein Neustart versucht es nochmals
     assert not jobs.daily_running()
 
 
-def test_daily_sends_only_boost_by_default(engine, monkeypatch):
+def test_daily_sends_only_the_schein_by_default(engine, monkeypatch):
     import asyncio
     from datetime import datetime, timedelta
 
@@ -262,7 +262,8 @@ def test_daily_sends_only_boost_by_default(engine, monkeypatch):
         __import__("zoneinfo").ZoneInfo("UTC")).replace(tzinfo=None).isoformat()
     leg = {"match_id": 1, "match": "A – B", "kickoff": kick, "label": "Über 2.5 Tore", "market": "OU2.5",
            "selection": "O", "prob": 0.6, "agent": {"assessment": "bestätigt", "reason": ""}}
-    plan = {"top": [], "boost_combos": [{"day": day, "cat": "liga_eu", "legs": [leg], "prob": 0.6, "boost": True}]}
+    plan = {"top": [], "boost_combos": [{"day": day, "cat": "liga_eu", "legs": [leg], "prob": 0.6, "boost": True}],
+            "mini_combos": [{"day": day, "cat": "mini", "legs": [leg], "prob": 0.6, "mini": True}]}
     sent = []
 
     async def notify(_bot, text, **_kw):
@@ -272,11 +273,11 @@ def test_daily_sends_only_boost_by_default(engine, monkeypatch):
     monkeypatch.setattr(state, "refresh", lambda engine, days=3, agents=False: {"agent": []})
     monkeypatch.setattr(state, "load_plan", lambda: plan)
     asyncio.run(jobs.run_daily_now(engine))
-    assert len(sent) == 2 and "Boost-Kombi heute" in sent[1]  # nur Start + Boost, keine sicheren Tipps
-    monkeypatch.setenv("DAILY_SAFE", "1")
+    assert len(sent) == 1 and "Schein heute" in sent[0]  # nur eine Nachricht: was gespielt werden soll
+    monkeypatch.setenv("DAILY_BOOST", "1")
     sent.clear()
     asyncio.run(jobs.run_daily_now(engine))
-    assert any("Tipps heute" in m or "keine Tipps" in m for m in sent[2:])  # mit DAILY_SAFE=1 auch die sicheren
+    assert len(sent) == 2 and "Boost-Kombi heute" in sent[0]  # Boost nur auf Wunsch (DAILY_BOOST=1)
 
 
 def test_boost_combo_always_exists_mixed_leagues():
@@ -585,7 +586,7 @@ def test_daily_sends_mini_kombi_and_tracks_it(engine, monkeypatch):
     monkeypatch.setattr(state, "refresh", lambda engine, days=3, agents=False: {"agent": []})
     monkeypatch.setattr(state, "load_plan", lambda: plan)
     asyncio.run(jobs.run_daily_now(engine))
-    mini = next(m for m in sent if "Mini-Kombi" in m)
+    mini = next(m for m in sent if "Schein heute" in m)
     assert mini.count("🟢") == 3 and "Gesamtquote ca." in mini
     assert f"mini-{day}" in tracking.stats(engine)["batches"]
 
@@ -610,3 +611,20 @@ def test_agents_show_referee_weather_pitch():
     text = telegram_bot.format_boost({"mini_combos": [{"day": "2999-01-01", "legs": [leg], "prob": 0.75}]},
                                      "mini_combos", telegram_bot.MINI_TITLE)
     assert "👨‍⚖️ Sandro Schärer" in text and "🌦️ Regen" in text
+
+
+def test_schein_targets_total_odds_about_3():
+    from datetime import datetime
+
+    from fussball import service
+
+    now = datetime(2026, 10, 18, 8, 0)
+    plan = _mini_plan([0.84, 0.80, 0.76, 0.72, 0.70, 0.68, 0.66, 0.64], now)
+    plan.config["mini_combo"] = {"sizes": [3, 4], "min_odds": 2.8, "max_odds": 3.6, "min_prob": 0.62,
+                                 "max_prob": 0.85}
+    (combo,) = service.build_mini(plan, now=now)
+    odds = 1.0
+    for lg in combo["legs"]:
+        odds *= service.SPORTTIP_FACTOR / lg["prob"]
+    assert combo["size"] in (3, 4) and 2.8 <= odds <= 3.6
+    assert combo["prob"] >= 0.25  # geht etwa jeden 3.–4. Tag auf

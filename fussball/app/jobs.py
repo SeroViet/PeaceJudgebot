@@ -41,7 +41,9 @@ async def start(engine) -> list:
         await _bot.updater.start_polling(drop_pending_updates=True, timeout=5, poll_interval=1.0,
                                          error_callback=lambda e: log.warning("Telegram-Polling: %s", e))
         log.info("Telegram-Bot gestartet")
-        await telegram_bot.notify(_bot, f"✅ <b>PeaceJudge gestartet</b> · Version <code>{telegram_bot.version()}</code> · /status")
+        if os.getenv("STARTUP_MSG", "0") == "1":  # sonst nur Nachrichten, was gespielt werden soll
+            await telegram_bot.notify(_bot, f"✅ <b>PeaceJudge gestartet</b> · Version "
+                                      f"<code>{telegram_bot.version()}</code> · /status")
     if _bot is not None:
         await _restore_costs(engine)
     if os.getenv("DISABLE_SCHEDULER") == "1":
@@ -255,8 +257,9 @@ def safe_on() -> bool:
 
 
 async def _run_daily_locked(engine, loop) -> None:
-    await telegram_bot.notify(_bot, "🔎 <b>Agenten prüfen jetzt die heutigen Spiele</b> (mehrere gleichzeitig) – "
-                              "die Tipps kommen in ca. 10–20 Minuten.")
+    if os.getenv("DAILY_ANNOUNCE", "0") == "1":
+        await telegram_bot.notify(_bot, "🔎 <b>Agenten prüfen jetzt die heutigen Spiele</b> (mehrere gleichzeitig) – "
+                                  "die Tipps kommen in ca. 10–20 Minuten.")
     info: dict = {}
     for _ in range(40 if engine is not None else 0):  # läuft gerade ein Refresh: kurz warten (max. 20 Min.)
         info = await loop.run_in_executor(None, lambda: state.refresh(
@@ -265,7 +268,7 @@ async def _run_daily_locked(engine, loop) -> None:
             break
         await asyncio.sleep(30)
     plan = state.load_plan()
-    boost = telegram_bot.format_boost(plan) if os.getenv("DAILY_BOOST", "1") == "1" else ""
+    boost = telegram_bot.format_boost(plan) if os.getenv("DAILY_BOOST", "0") == "1" else ""
     sent = False
     if boost:  # Hauptnachricht: die Boost-Kombi
         await telegram_bot.notify(_bot, boost, share=True)
@@ -276,10 +279,10 @@ async def _run_daily_locked(engine, loop) -> None:
         await telegram_bot.notify(_bot, mini, share=True)
         _track_boost(engine, plan, "mini_combos", "Mini-Kombi")
         sent = True
-    if safe_on() or not boost:  # sichere Tipps nur auf Wunsch – oder als Ersatz, wenn heute keine Boost-Kombi geht
-        if not boost:
-            await telegram_bot.notify(_bot, "ℹ️ Heute ist keine Boost-Kombi möglich (zu wenige Tipps ab Quote 1.30) "
-                                      "– hier die sicheren Tipps:")
+    if not sent and not safe_on():
+        await telegram_bot.notify(_bot, "ℹ️ Heute gibt es keinen sicheren Schein mit Gesamtquote ca. 3 – "
+                                  "lieber nichts spielen.", share=True)
+    if safe_on():  # sichere Einzeltipps nur auf Wunsch (DAILY_SAFE=1)
         await telegram_bot.notify(_bot, telegram_bot.format_top5(plan), share=True)
         _track_top(engine, plan)
         sent = sent or bool(telegram_bot.top_tips(plan))

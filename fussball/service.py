@@ -1031,15 +1031,16 @@ def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: i
 
 
 def build_mini(plan: "DailyPlan", skip: set[int] | None = None, now: datetime | None = None) -> list[dict]:
-    """Mini-Kombi: genau 3 Spiele (verschiedene) mit Sporttip-Gesamtquote 2–3, so sicher wie möglich.
-    Aus den sichersten Tipps des Tages wird die Dreier-Kombi mit der höchsten Chance gewählt, deren
-    Gesamtquote im Bereich liegt; gibt es heute keine mehr, die von morgen."""
+    """Schein des Tages (Mini-Kombi): wenige Spiele (mini_combo.sizes, Standard 3 oder 4, alle verschieden)
+    mit Sporttip-Gesamtquote im Bereich (Standard ca. 2.8–3.6). Aus den sichersten Tipps des Tages wird die
+    Kombi mit der höchsten Chance gewählt; gibt es heute keine mehr, die von morgen."""
     from itertools import combinations
 
     from fussball.app.state import local
 
     mc = plan.config.get("mini_combo", {})
-    size, lo_odds, hi_odds = mc.get("size", 3), mc.get("min_odds", 2.0), mc.get("max_odds", 3.0)
+    sizes = mc.get("sizes") or [mc.get("size", 3)]
+    lo_odds, hi_odds = mc.get("min_odds", 2.0), mc.get("max_odds", 3.0)
     now = now or utcnow()
     today = local(now.isoformat()).date()
     pool = [f for f in plan.all_forecasts or plan.forecasts if f.match_id not in (skip or set())]
@@ -1048,14 +1049,15 @@ def build_mini(plan: "DailyPlan", skip: set[int] | None = None, now: datetime | 
                 if local(t["kickoff"]).date() == day and datetime.fromisoformat(t["kickoff"]) > now]
         legs = sorted(legs, key=lambda t: -t["prob"])[: mc.get("candidates", 14)]
         best, best_p = None, 0.0
-        for trio in combinations(legs, size):
-            odds = float(np.prod([SPORTTIP_FACTOR / t["prob"] for t in trio]))
-            p = float(np.prod([t["prob"] for t in trio]))
-            if lo_odds <= odds <= hi_odds and p > best_p:
-                best, best_p = trio, p
+        for size in sizes:  # möglichst wenige Spiele; mehr nur, wenn die Kombi dadurch sicherer wird
+            for trio in combinations(legs, size):
+                odds = float(np.prod([SPORTTIP_FACTOR / t["prob"] for t in trio]))
+                p = float(np.prod([t["prob"] for t in trio]))
+                if lo_odds <= odds <= hi_odds and p > best_p:
+                    best, best_p = trio, p
         if best:
             chosen = sorted(best, key=lambda t: t["kickoff"])
-            return [{"day": day.isoformat(), "size": size, "legs": chosen, "prob": best_p, "fair_odds": 1 / best_p,
+            return [{"day": day.isoformat(), "size": len(chosen), "legs": chosen, "prob": best_p, "fair_odds": 1 / best_p,
                      "leg_min": min(t["prob"] for t in chosen), "mini": True, "risky": False, "cat": "mini"}]
     return []
 

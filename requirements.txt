@@ -1,2 +1,17 @@
-python-telegram-bot==20.8
-aiohttp
+python-telegram-bot>=21.6,<22
+pandas>=2.2
+numpy>=1.26
+scipy>=1.11
+SQLAlchemy>=2.0
+psycopg2-binary>=2.9  # Postgres (z. B. Neon) für dauerhafte Speicherung
+requests>=2.31
+python-dotenv>=1.0
+PyYAML>=6.0
+fastapi>=0.110
+uvicorn>=0.29
+jinja2>=3.1
+python-multipart>=0.0.9
+itsdangerous>=2.1
+pyotp>=2.9
+pytest>=8.0
+anthropic>=1.9

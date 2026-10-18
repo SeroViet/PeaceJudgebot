@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <title>Login – PeaceJudge</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="min-h-screen flex items-center justify-center px-4">
+  <form method="post" action="/login" class="card w-full max-w-sm space-y-4 p-6">
+    <h1 class="text-xl font-bold">⚽ PeaceJudge</h1>
+    {% if not configured %}
+      <p class="text-sm text-amber-400">Noch kein Passwort eingerichtet. Auf dem Server ausführen:
+        <code class="block mt-2 text-xs bg-black/40 p-2 rounded">python -m fussball set-password</code></p>
+    {% endif %}
+    {% if error %}<p class="text-sm text-red-400">{{ error }}</p>{% endif %}
+    <label class="block text-sm">Passwort
+      <input type="password" name="password" autocomplete="current-password" required autofocus>
+    </label>
+    {% if totp %}
+    <label class="block text-sm">6-stelliger Code (Authenticator-App)
+      <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" required>
+    </label>
+    {% endif %}
+    <button class="btn w-full">Anmelden</button>
+  </form>
+</body>
+</html>

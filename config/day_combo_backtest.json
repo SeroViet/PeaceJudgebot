@@ -1,0 +1,33 @@
+{
+ "period": "2020-21 bis 2026-27",
+ "leagues": [
+  "E0",
+  "D1",
+  "I1",
+  "SP1",
+  "F1"
+ ],
+ "leg_range": [
+  0.75,
+  0.88
+ ],
+ "legs": {
+  "n": 9214,
+  "expected": 0.814,
+  "hit": 0.826
+ },
+ "5": {
+  "days": 530,
+  "expected": 0.434,
+  "hit": 0.46,
+  "avg_correct": 4.27,
+  "avg_fair_odds": 2.34
+ },
+ "6": {
+  "days": 465,
+  "expected": 0.368,
+  "hit": 0.413,
+  "avg_correct": 5.17,
+  "avg_fair_odds": 2.76
+ }
+}

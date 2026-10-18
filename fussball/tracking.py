@@ -73,7 +73,7 @@ def market_parts(market: str, selection: str) -> list[Part] | None:
     for prefix in ("OU", "HOME", "AWAY"):
         if market.startswith(prefix) and market != prefix:
             return [Part(prefix, selection, float(market[len(prefix):]), half)]
-    if market in ("1X2", "DC", "BTTS"):
+    if market in ("1X2", "DC", "BTTS", "DNB"):
         return [Part(market, selection, 0.0, half)]
     return None
 
@@ -115,6 +115,9 @@ def _half_from_final(p: Part, fh: int, fa: int) -> bool | None:
 
 
 def part_won(p: Part, fh: int, fa: int, hh: int | None, ha: int | None) -> bool | None:
+    if p.market == "DNB":  # Draw No Bet: bei Unentschieden Einsatz zurück (⚪)
+        h, a = (hh, ha) if p.half == "1h" else (fh, fa)
+        return None if h is None or a is None or h == a else (h > a) == (p.selection == "H")
     if p.half == "1h":
         if hh is None or ha is None:
             return _half_from_final(p, fh, fa)

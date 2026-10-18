@@ -634,6 +634,10 @@ EXCLUDED_TIPS = {("DC", "12"), ("1X2", "D"), ("OU4.5", "O"), ("HOME0.5", "U"), (
                  ("HOME0.5", "O"), ("AWAY0.5", "O"), ("OU0.5", "O"), ("OU0.5", "U"),  # keine 0.5-Linien („trifft“)
                  ("HOME1.5", "U"), ("AWAY1.5", "U"),  # keine „Team unter …“-Tipps
                  ("H1_DC", "12"), ("H1_OU0.5", "U"), ("H1_OU1.5", "O")}
+# Schein des Tages: alles, was sich aus den Quoten berechnen lässt (auch 12, X, Draw No Bet, „Team trifft“,
+# Team unter …, 1. Halbzeit) – der Bot wählt pro Spiel den sichersten Tipp
+SCHEIN_MARKETS = ("1X2", "DC", "DNB", "BTTS", "OU0.5", "OU1.5", "OU2.5", "OU3.5", "OU4.5", "HOME0.5", "HOME1.5",
+                  "AWAY0.5", "AWAY1.5", "H1_1X2", "H1_DC", "H1_OU0.5", "H1_OU1.5", "H1_BTTS")
 MAX_SAME_TIP = 2  # höchstens 2× derselbe Tipp (z. B. "Über 1.5 Tore") pro Kombi
 # Tore-Tipps (Über/Unter, beide treffen) werden bevorzugt, solange sie nur wenig unsicherer sind
 GOAL_BONUS = 0.04
@@ -1045,9 +1049,10 @@ def build_mini(plan: "DailyPlan", skip: set[int] | None = None, now: datetime | 
     lo_odds, hi_odds = mc.get("min_odds", 2.0), mc.get("max_odds", 3.0)
     target = (lo_odds + hi_odds) / 2
     # (Anzahl Spiele, Chance pro Tipp von–bis, Gesamtquote von–bis); Stufe > 0 = Schein etwas weniger sicher
+    # höchstens ca. 85 %: sicherere Tipps (Quote unter ~1.10) bringen nichts, erhöhen nur das Risiko
     stages = [(sizes, mc.get("min_prob", 0.62), mc.get("max_prob", 0.85), lo_odds, hi_odds),
-              ([2, 3, 4, 5], 0.55, 0.92, 2.5, 4.0),
-              ([2, 3, 4, 5, 6], 0.48, 0.95, 2.0, 5.0)]
+              ([2, 3, 4, 5], 0.55, 0.85, 2.5, 4.0),
+              ([2, 3, 4, 5, 6], 0.48, 0.85, 2.0, 5.0)]
     now = now or utcnow()
     today = local(now.isoformat()).date()
     pool = [f for f in plan.all_forecasts or plan.forecasts if f.match_id not in (skip or set())]
@@ -1064,7 +1069,7 @@ def build_mini(plan: "DailyPlan", skip: set[int] | None = None, now: datetime | 
 
     for day in (today, today + timedelta(days=1)):
         def tips(lo, hi):
-            out = [t for t in best_tip_per_match(pool, lo, hi)
+            out = [t for t in best_tip_per_match(pool, lo, hi, SCHEIN_MARKETS, exclude=set())
                    if local(t["kickoff"]).date() == day and datetime.fromisoformat(t["kickoff"]) > now]
             return sorted(out, key=lambda t: -t["prob"])[: mc.get("candidates", 14)]
 
@@ -1078,7 +1083,7 @@ def build_mini(plan: "DailyPlan", skip: set[int] | None = None, now: datetime | 
             if best:
                 return combo(day, best, stage)
         # letzter Ausweg: die Kombi (2–6 Spiele), deren Gesamtquote am nächsten bei ca. 3 liegt
-        legs = tips(0.40, 0.97)[:10]
+        legs = tips(0.40, 0.85)[:10]
         trios = [t for n in range(2, 7) for t in combinations(legs, n)]
         if trios:
             return combo(day, min(trios, key=lambda t: (abs(odds(t) - target), -np.prod([x["prob"] for x in t]))),

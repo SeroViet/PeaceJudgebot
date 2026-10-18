@@ -49,6 +49,8 @@ def _mask(p: Part, h: np.ndarray, a: np.ndarray) -> np.ndarray:
         return {"1X": h >= a, "X2": h <= a, "12": h != a}[s]
     if m == "OU":
         return (h + a > line) if s == "O" else (h + a < line)
+    if m == "DNB":  # Unentschieden zählt hier als nicht gewonnen (Auswertung: tracking.part_won)
+        return (h > a) if s == "H" else (h < a)
     if m == "BTTS":
         both = (h > 0) & (a > 0)
         return both if s == "Y" else ~both

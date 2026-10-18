@@ -635,3 +635,29 @@ def test_schein_targets_total_odds_about_3():
         odds *= service.SPORTTIP_FACTOR / lg["prob"]
     assert combo["size"] in (3, 4) and 2.8 <= odds <= 3.6
     assert combo["prob"] >= 0.25  # geht etwa jeden 3.–4. Tag auf
+
+
+def test_schein_can_use_every_market_and_draw_no_bet_is_settled():
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace
+
+    from fussball import service
+    from fussball.models.builder import Part
+    from fussball.service import MatchForecast
+    from fussball.tracking import market_parts, part_won
+
+    now = datetime(2026, 10, 18, 8, 0)
+    implied = [{"DNB": {"H": 0.80, "A": 0.20}}, {"DC": {"12": 0.78, "1X": 0.5, "X2": 0.5}},
+               {"BTTS": {"Y": 0.70, "N": 0.30}}, {"HOME0.5": {"O": 0.72, "U": 0.28}}]
+    fs = [MatchForecast(i, "soccer_epl", "EPL", now + timedelta(hours=3 + i), f"H{i}", f"A{i}", 1.6, 1.3, {}, {},
+                        {}, None, None, 0.0, {}, implied=imp) for i, imp in enumerate(implied)]
+    plan = SimpleNamespace(config={"mini_combo": {"sizes": [3, 4], "min_odds": 2.0, "max_odds": 4.0}},
+                           all_forecasts=fs, forecasts=fs)
+    (combo,) = service.build_mini(plan, now=now)
+    used = {(lg["market"], lg["selection"]) for lg in combo["legs"]}
+    assert {("DC", "12"), ("HOME0.5", "O"), ("BTTS", "Y")} <= used  # auch 12, „Team trifft“, beide treffen …
+    cands = service.best_tip_per_match(fs, 0.6, 0.85, service.SCHEIN_MARKETS, exclude=set())
+    assert ("DNB", "H") in {(t["market"], t["selection"]) for t in cands}  # … und Draw No Bet
+    (dnb,) = market_parts("DNB", "H")
+    assert part_won(dnb, 2, 1, None, None) is True and part_won(dnb, 1, 1, None, None) is None
+    assert part_won(Part("DNB", "H"), 0, 1, None, None) is False

@@ -70,7 +70,7 @@ def label(market: str, sel: str, home: str, away: str) -> str:
     if market == "DC":
         return {"1X": f"1X ({home})", "X2": f"X2 ({away})", "12": "12 (kein Unentschieden)"}[sel]
     if market == "DNB":
-        return f"Draw No Bet: {home if sel == 'H' else away}"
+        return f"{home if sel == 'H' else away} gewinnt (bei Unentschieden Geld zurück)"
     if market == "BTTS":
         return "Beide Teams treffen: Ja" if sel == "Y" else "Beide Teams treffen: Nein"
     if market.startswith("OU"):

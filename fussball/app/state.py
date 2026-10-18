@@ -59,6 +59,7 @@ def serialize_plan(plan: service.DailyPlan) -> dict:
         "risky_combos": [{**c, "id": f"R{i}"} for i, c in enumerate(plan.risky_combos, start=1)],
         "krass_combos": [{**c, "id": f"X{i}"} for i, c in enumerate(plan.krass_combos, start=1)],
         "boost_combos": [{**c, "id": f"B{i}"} for i, c in enumerate(plan.boost_combos, start=1)],
+        "mini_combos": [{**c, "id": f"M{i}"} for i, c in enumerate(plan.mini_combos, start=1)],
         "torfest_combos": [{**c, "id": f"F{i}"} for i, c in enumerate(plan.torfest_combos, start=1)],
         "top": plan.top,
         "forecasts": [f.to_dict() for f in plan.forecasts],
@@ -166,6 +167,20 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
         except Exception as exc:  # noqa: BLE001
             log.exception("Agenten (Top-Tipps) fehlgeschlagen")
             _note(exc)
+        if os.getenv("DAILY_MINI", "1") == "1":
+            # Mini-Kombi zuerst prüfen (3 sehr sichere Tipps): sie bekommt das Budget sicher, gründlich mit
+            # Gegenprüfer und bis zu 3 Ersatz-Runden
+            plan.mini_combos = service.build_mini(plan)
+            service.annotate_value(engine, plan.mini_combos)
+            try:
+                if agents:
+                    info["agent"] += service.apply_agents_boost(
+                        engine, plan, rounds=3, attr="mini_combos", rebuild=lambda skip: service.build_mini(plan, skip))
+                else:
+                    service.carry_boost(plan, old.get("mini_combos", []), attr="mini_combos")
+            except Exception as exc:  # noqa: BLE001
+                log.exception("Agenten (Mini-Kombi) fehlgeschlagen")
+                _note(exc)
         for kind, attr, letter in (("boost", "boost_combos", "B"), ("torfest", "torfest_combos", "F"),
                                    ("risky", "risky_combos", "R"), ("krass", "krass_combos", "X")):
             setattr(plan, attr, service.build_extra_combos(plan, kind))
@@ -188,13 +203,14 @@ def refresh(engine: Engine, fetch: bool = True, days: int = 3, agents: bool = Fa
                 log.exception("Agenten (%s) fehlgeschlagen", kind)
                 _note(exc)
         books = plan.config.get("bookmakers") or None
-        for combos in (plan.day_combos, plan.boost_combos, plan.torfest_combos, plan.risky_combos,
-                       plan.krass_combos):
+        for combos in (plan.day_combos, plan.boost_combos, plan.mini_combos, plan.torfest_combos,
+                       plan.risky_combos, plan.krass_combos):
             service.attach_book_odds(engine, combos, books)
         from fussball.agents import slip
 
         table = slip.ratios(engine)
-        for c in plan.day_combos + plan.boost_combos + plan.torfest_combos + plan.risky_combos + plan.krass_combos:
+        for c in (plan.day_combos + plan.boost_combos + plan.mini_combos + plan.torfest_combos + plan.risky_combos
+                  + plan.krass_combos):
             for leg in c["legs"]:
                 leg["sporttip_est"] = slip.estimate(table, leg["market"], 1 / leg["prob"])
         data = serialize_plan(plan)

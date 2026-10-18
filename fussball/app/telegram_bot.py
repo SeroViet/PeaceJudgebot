@@ -97,7 +97,7 @@ def top_tips(plan: dict, n: int | None = None, day: str | None = None) -> dict[s
     day = day or now.date().isoformat()
     tomorrow = (datetime.fromisoformat(day) + timedelta(days=1)).date().isoformat()
     reports = {l["match_id"]: (l.get("agent") or {})
-               for k in ("day_combos", "boost_combos", "torfest_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) for l in c["legs"]}
+               for k in ("day_combos", "boost_combos", "mini_combos", "torfest_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) for l in c["legs"]}
     for t in plan.get("top") or []:  # eigenes Urteil des Scouts zu genau diesem Top-Tipp
         if t.get("agent"):
             reports[t["match_id"]] = {"assessment": t["agent"], "reason": t.get("reason", "")}
@@ -243,7 +243,7 @@ def _find_legs(plan: dict, tip_id: str) -> list[dict] | None:
         c = next((c for c in plan["combos"] if c["id"] == tid), None)
         return c["legs"] if c else None
     if tid.startswith(("T", "R", "X", "B", "F")):
-        c = next((c for c in plan.get("day_combos", []) + plan.get("boost_combos", []) + plan.get("torfest_combos", []) + plan.get("risky_combos", []) + plan.get("krass_combos", []) if c["id"] == tid), None)
+        c = next((c for c in plan.get("day_combos", []) + plan.get("boost_combos", []) + plan.get("mini_combos", []) + plan.get("torfest_combos", []) + plan.get("risky_combos", []) + plan.get("krass_combos", []) if c["id"] == tid), None)
         if not c:
             return None
         out = []
@@ -298,7 +298,7 @@ def _odds_time(legs: list[dict]) -> str:
 def check_sporttip(plan: dict, combo_id: str, quotes: list[float]) -> str:
     """Sporttip-Quoten mit den fairen Quoten der Tageskombi vergleichen.
     Eine Zahl = Gesamtquote der Kombi; sonst eine Quote pro Spiel (in der Reihenfolge der Nachricht)."""
-    c = next((c for c in plan.get("day_combos", []) + plan.get("boost_combos", []) + plan.get("torfest_combos", []) + plan.get("risky_combos", []) + plan.get("krass_combos", [])
+    c = next((c for c in plan.get("day_combos", []) + plan.get("boost_combos", []) + plan.get("mini_combos", []) + plan.get("torfest_combos", []) + plan.get("risky_combos", []) + plan.get("krass_combos", [])
               if c["id"].upper() == combo_id.upper()), None)
     if c is None:
         return f"Kombi {combo_id} nicht gefunden. Die aktuelle Nummer steht in /tageskombi (z. B. T1)."
@@ -423,11 +423,12 @@ def format_boost(plan: dict, key: str = "boost_combos",
     from datetime import datetime
 
     today = datetime.now(state.TZ).date().isoformat()
-    if key == "boost_combos":
+    checked_kind = key in ("boost_combos", "mini_combos")  # von den Agenten geprüft: ⚪ zeigen, wenn nicht
+    if checked_kind:
         from fussball.service import boost_day
 
         day = boost_day(plan.get(key, []))  # heute, sonst die nächste (die Boost-Kombi gibt es immer)
-        combos = [c for c in plan.get(key, []) if c["day"] == day][:1]  # genau eine Boost-Kombi
+        combos = [c for c in plan.get(key, []) if c["day"] == day][:1]  # genau eine Kombi
         if day and day != today:
             title = title.replace("heute", f"für {day[8:10]}.{day[5:7]}.")
     else:
@@ -440,7 +441,7 @@ def format_boost(plan: dict, key: str = "boost_combos",
         out.append(f"\n<b>{SHORT_CAT.get(c.get('cat'), '')}</b>")
         for l in c["legs"]:
             a = (l.get("agent") or {})
-            mark = icon.get(a.get("assessment"), " ⚪" if key == "boost_combos" else "")
+            mark = icon.get(a.get("assessment"), " ⚪" if checked_kind else "")
             out.append(f"<b>{state.local(l['kickoff']).strftime('%H:%M')} {l['match']}</b>\n"
                        f"➡️ {tip(l['label'])} · {l['prob']:.0%} · Quote ca. {leg_sporttip(l):.2f}{mark}"
                        + (f"\n<i>🔴 {html.escape(a['reason'])}</i>"
@@ -450,9 +451,16 @@ def format_boost(plan: dict, key: str = "boost_combos",
                    f" · Chance {c['prob']:.0%}</i>")
         if c.get("boost") and not all_150:
             out.append("<i>ℹ️ Tipps unter 1.50 dabei → ohne Sporttip-KombiBoost.</i>")
-    if key == "boost_combos":
+    if checked_kind:
         out.append("\n<i>💡 Als normale Kombi spielen (keine Systemwette) · nur kleiner Einsatz.</i>")
     return "\n".join(out)
+
+
+MINI_TITLE = "🛡️ <b>Mini-Kombi heute</b> (3 sehr sichere Tipps, Gesamtquote ca. 2–3)"
+
+
+def format_mini(plan: dict) -> str:
+    return format_boost(plan, "mini_combos", MINI_TITLE)
 
 
 def sporttip_estimate(c: dict) -> float | None:
@@ -530,13 +538,13 @@ def format_today(plan: dict) -> str:
     from datetime import datetime
 
     today = datetime.now(state.TZ).date().isoformat()
-    every = [c for k in ("day_combos", "boost_combos", "torfest_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) if c["day"] == today]
+    every = [c for k in ("day_combos", "boost_combos", "mini_combos", "torfest_combos", "risky_combos", "krass_combos") for c in plan.get(k, []) if c["day"] == today]
     dropped = 0
     if os.getenv("VALUE_ONLY") == "1":  # Nur-Value-Modus: Kombis weglassen, die bei Sporttip vermutlich Verlust sind
         keep = [c for c in every if sporttip_estimate(c) is None or sporttip_estimate(c) >= c["fair_odds"]]
         dropped, every = len(every) - len(keep), keep
         plan = {**plan, **{k: [c for c in plan.get(k, []) if c in keep or c["day"] != today]
-                           for k in ("day_combos", "boost_combos", "torfest_combos", "risky_combos", "krass_combos")}}
+                           for k in ("day_combos", "boost_combos", "mini_combos", "torfest_combos", "risky_combos", "krass_combos")}}
     note = (f"\n\n🧮 {dropped} Kombi(s) weggelassen – Sporttip zahlt dort vermutlich weniger als fair."
             if dropped else "")
     if any(c["day"] == today for c in plan.get("day_combos", [])):
@@ -633,6 +641,7 @@ def format_stats(engine) -> str:
 
 COMMANDS = [
     ("boost", "Boost-Kombi von heute (8 Tipps ab Quote 1.30)"),
+    ("mini", "Mini-Kombi von heute (3 sehr sichere Tipps, Gesamtquote 2–3)"),
     ("top5", "Die 5–6 sichersten Tipps von heute, vom Scout geprüft"),
     ("tageskombi", "Sichere 3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("ergebnisse", "Bilanz + letzte Tipps: 🟢 gewonnen / 🔴 verloren"),
@@ -693,7 +702,7 @@ def build(engine) -> Application | None:
             return
         await reply(update, "👋 PeaceJudge ist bereit.\n/top5 – die sichersten Tipps von heute\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/tageskombi – 3er- und 5er-Kombi, alle Spiele am selben Tag\n"
-                            "/boost – Boost-Kombi: 8 Tipps ab Quote 1.30\n"
+                            "/boost – Boost-Kombi: 8 Tipps ab Quote 1.30\n/mini – Mini-Kombi: 3 sehr sichere Tipps, Gesamtquote 2–3\n"
                             "/torfest – 1. Halbzeit Über 1.5 in den torreichsten Spielen\n"
                             "/risiko – Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8\n"
                             "/krass – Krass-Kombi: 3 BetBuilder, Quote ca. 8–25\n"
@@ -778,6 +787,10 @@ def build(engine) -> Application | None:
         combos = plan.get("boost_combos", [])
         await reply(update, format_day_combos({**plan, "day_combos": combos}, max_days=2) if combos
                     else "Keine Boost-Kombi möglich (zu wenige Spiele mit Tipps ab Quote 1.30).")
+
+    async def cmd_mini(update: Update, _ctx):
+        await reply(update, format_mini(state.load_plan())
+                    or "Keine Mini-Kombi möglich (keine 3 sicheren Tipps mit Gesamtquote 2–3 heute oder morgen).")
 
     async def cmd_torfest(update: Update, _ctx):
         plan = state.load_plan()
@@ -911,7 +924,7 @@ def build(engine) -> Application | None:
     app.add_handler(CommandHandler("start", cmd_start))
     for name, fn in (("heute", cmd_today), ("top5", cmd_today), ("sicher", cmd_safe), ("tageskombi", cmd_day), ("analyse", cmd_analyse), ("kombi", cmd_combo), ("spiel", cmd_match),
                      ("bilanz", cmd_stats), ("gesetzt", cmd_placed), ("update", cmd_update),
-                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("boost", cmd_boost), ("torfest", cmd_torfest), ("kosten", cmd_costs), ("ergebnisse", cmd_results), ("status", cmd_status), ("jetzt", cmd_now), ("sag", cmd_say)):
+                     ("sporttip", cmd_sporttip), ("risiko", cmd_risky), ("krass", cmd_krass), ("boost", cmd_boost), ("mini", cmd_mini), ("torfest", cmd_torfest), ("kosten", cmd_costs), ("ergebnisse", cmd_results), ("status", cmd_status), ("jetzt", cmd_now), ("sag", cmd_say)):
         app.add_handler(CommandHandler(name, fn, filters=only_owner))
     app.add_handler(MessageHandler((filters.PHOTO | filters.Document.IMAGE) & only_owner, on_photo))
     return app

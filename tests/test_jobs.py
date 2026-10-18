@@ -502,3 +502,88 @@ def test_boost_fills_up_to_8_games():
     assert sum(lg["prob"] < 0.60 for lg in combo["legs"]) == 2
     (combo,) = service.boost_fallback(pool[:6], [], bc, now=now)
     assert combo["size"] == 6 and min(lg["prob"] for lg in combo["legs"]) >= 0.60  # nicht unnötig senken
+
+
+def _mini_plan(probs, now):
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from fussball.service import MatchForecast
+
+    fs = [MatchForecast(i, "soccer_switzerland_superleague", "Super League", now + timedelta(hours=3, minutes=10 * i),
+                        f"H{i}", f"A{i}", 1.6, 1.3, {}, {}, {}, None, None, 0.0, {},
+                        implied={"OU1.5": {"O": p, "U": 1 - p}}) for i, p in enumerate(probs)]
+    cfg = {"mini_combo": {"size": 3, "min_odds": 2.0, "max_odds": 3.0, "min_prob": 0.62, "max_prob": 0.85}}
+    return SimpleNamespace(config=cfg, all_forecasts=fs, forecasts=fs, mini_combos=[])
+
+
+def test_mini_kombi_three_safest_with_total_odds_2_to_3():
+    from datetime import datetime
+
+    from fussball import service
+
+    now = datetime(2026, 10, 18, 8, 0)
+    plan = _mini_plan([0.84, 0.82, 0.80, 0.74, 0.72, 0.70, 0.64], now)
+    (combo,) = service.build_mini(plan, now=now)
+    odds = 1.0
+    for lg in combo["legs"]:
+        odds *= service.SPORTTIP_FACTOR / lg["prob"]
+    assert combo["size"] == 3 and len({lg["match_id"] for lg in combo["legs"]}) == 3
+    assert 2.0 <= odds <= 3.0
+    # die sicherste Dreier-Kombi, die noch auf Quote 2 kommt (nicht einfach die drei sichersten: Quote zu tief)
+    assert combo["prob"] == max(a * b * c for a, b, c in __import__("itertools").combinations(
+        [0.84, 0.82, 0.80, 0.74, 0.72, 0.70, 0.64], 3) if 2.0 <= (0.93 / a) * (0.93 / b) * (0.93 / c) <= 3.0)
+    assert service.build_mini(_mini_plan([0.84, 0.82], now), now=now) == []  # zu wenige Spiele: keine
+
+
+def test_mini_kombi_agents_replace_warned_games(engine, monkeypatch):
+    from datetime import datetime, timedelta
+
+    from fussball import service
+    from fussball.agents import runner
+    from fussball.data.schema import utcnow
+
+    now = utcnow()
+    plan = _mini_plan([0.80, 0.76, 0.74, 0.72, 0.70], now)
+    plan.mini_combos = service.build_mini(plan, now=now)
+    first = [lg["match_id"] for lg in plan.mini_combos[0]["legs"]]
+    bad = first[0]
+    monkeypatch.setattr(service, "annotate_value", lambda e, c: None)
+    monkeypatch.setattr(runner, "check_tips", lambda e, items, **kw: [
+        {"assessment": "streichen" if i["match_id"] == bad else "bestätigt", "reason": "Stammspieler fehlen"
+         if i["match_id"] == bad else ""} for i in items])
+    monkeypatch.setattr(runner, "challenge_tips", lambda e, items, **kw: [{"assessment": "bestätigt"} for _ in items])
+    service.apply_agents_boost(engine, plan, rounds=3, attr="mini_combos",
+                               rebuild=lambda skip: service.build_mini(plan, skip, now=now))
+    legs = plan.mini_combos[0]["legs"]
+    assert bad not in [lg["match_id"] for lg in legs] and len(legs) == 3  # gestrichenes Spiel ersetzt
+    assert all(lg["agent"]["assessment"] == "bestätigt" for lg in legs)
+    assert datetime.fromisoformat(legs[0]["kickoff"]) > now - timedelta(minutes=1)
+
+
+def test_daily_sends_mini_kombi_and_tracks_it(engine, monkeypatch):
+    import asyncio
+    from datetime import datetime, timedelta
+
+    from fussball import tracking
+    from fussball.app import jobs, state
+
+    day = datetime.now(state.TZ).date().isoformat()
+    kick = (datetime.now(state.TZ) + timedelta(hours=1)).astimezone(
+        __import__("zoneinfo").ZoneInfo("UTC")).replace(tzinfo=None).isoformat()
+    leg = lambda i: {"match_id": i, "match": f"H{i} – A{i}", "kickoff": kick, "label": "Über 1.5 Tore",  # noqa: E731
+                     "market": "OU1.5", "selection": "O", "prob": 0.75, "agent": {"assessment": "bestätigt"}}
+    plan = {"top": [], "boost_combos": [], "mini_combos": [{"day": day, "cat": "mini", "legs": [leg(i) for i in range(3)],
+                                                            "prob": 0.42, "mini": True}]}
+    sent = []
+
+    async def notify(_bot, text, **_kw):
+        sent.append(text)
+
+    monkeypatch.setattr(telegram_bot, "notify", notify)
+    monkeypatch.setattr(state, "refresh", lambda engine, days=3, agents=False: {"agent": []})
+    monkeypatch.setattr(state, "load_plan", lambda: plan)
+    asyncio.run(jobs.run_daily_now(engine))
+    mini = next(m for m in sent if "Mini-Kombi" in m)
+    assert mini.count("🟢") == 3 and "Gesamtquote ca." in mini
+    assert f"mini-{day}" in tracking.stats(engine)["batches"]

@@ -980,18 +980,21 @@ def build_extra_combos(plan: "DailyPlan", kind: str, skip: set[int] | None = Non
         kc.get("max_prob", 0.50), skip=skip)]
 
 
-def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: int = 2) -> list[dict]:
-    """Boost-Kombi des Tages (2. Tipp-Nachricht): jede Leg wird wie die sicheren Tipps geprüft (schon
-    recherchierte Spiele nur bewertet, 1–2 Rappen). Gewarnte/gestrichene Spiele werden ersetzt.
+def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: int = 2,
+                       attr: str = "boost_combos", rebuild=None) -> list[dict]:
+    """Boost-Kombi (bzw. Mini-Kombi mit attr='mini_combos') des Tages: jede Leg wird wie die sicheren Tipps
+    geprüft (schon recherchierte Spiele nur bewertet, 1–2 Rappen) und vom Gegenprüfer angegriffen.
+    Gewarnte/gestrichene Spiele werden ersetzt.
     Ergebnis in leg['agent'] = {assessment, reason}; ohne Budget bleibt eine Leg ungeprüft (⚪)."""
     from fussball.agents import runner
     from fussball.app.state import local
 
+    rebuild = rebuild or (lambda skip: build_extra_combos(plan, "boost", skip=skip))
     done: dict[int, dict] = {}
     skip: set[int] = set()
     for _ in range(rounds):
-        today = boost_day(plan.boost_combos)
-        combos = [c for c in plan.boost_combos if c["day"] == today][:1]
+        today = boost_day(getattr(plan, attr))
+        combos = [c for c in getattr(plan, attr) if c["day"] == today][:1]
         if not combos:
             return list(done.values())
         legs = [lg for lg in combos[0]["legs"] if lg["match_id"] not in done]
@@ -1012,17 +1015,47 @@ def apply_agents_boost(engine: Engine, plan: "DailyPlan", client=None, rounds: i
         if not bad - skip:
             break
         skip |= bad
-        rebuilt = build_extra_combos(plan, "boost", skip=skip)
+        rebuilt = rebuild(skip)
         if not [c for c in rebuilt if c["day"] == today]:
-            break  # ohne die gewarnten Spiele keine Boost-Kombi mehr möglich: so lassen (Warnung wird gezeigt)
-        plan.boost_combos = rebuilt
-        annotate_value(engine, plan.boost_combos)
-    for c in plan.boost_combos:  # Urteile auch auf neu gebaute Kombis übertragen
+            break  # ohne die gewarnten Spiele keine Kombi mehr möglich: so lassen (Warnung wird gezeigt)
+        setattr(plan, attr, rebuilt)
+        annotate_value(engine, rebuilt)
+    for c in getattr(plan, attr):  # Urteile auch auf neu gebaute Kombis übertragen
         for leg in c["legs"]:
             r = done.get(leg["match_id"]) or {}
             if r.get("assessment") and "agent" not in leg:
                 leg["agent"] = {"assessment": r["assessment"], "reason": r.get("reason", "")}
     return list(done.values())
+
+
+def build_mini(plan: "DailyPlan", skip: set[int] | None = None, now: datetime | None = None) -> list[dict]:
+    """Mini-Kombi: genau 3 Spiele (verschiedene) mit Sporttip-Gesamtquote 2–3, so sicher wie möglich.
+    Aus den sichersten Tipps des Tages wird die Dreier-Kombi mit der höchsten Chance gewählt, deren
+    Gesamtquote im Bereich liegt; gibt es heute keine mehr, die von morgen."""
+    from itertools import combinations
+
+    from fussball.app.state import local
+
+    mc = plan.config.get("mini_combo", {})
+    size, lo_odds, hi_odds = mc.get("size", 3), mc.get("min_odds", 2.0), mc.get("max_odds", 3.0)
+    now = now or utcnow()
+    today = local(now.isoformat()).date()
+    pool = [f for f in plan.all_forecasts or plan.forecasts if f.match_id not in (skip or set())]
+    for day in (today, today + timedelta(days=1)):
+        legs = [t for t in best_tip_per_match(pool, mc.get("min_prob", 0.62), mc.get("max_prob", 0.85))
+                if local(t["kickoff"]).date() == day and datetime.fromisoformat(t["kickoff"]) > now]
+        legs = sorted(legs, key=lambda t: -t["prob"])[: mc.get("candidates", 14)]
+        best, best_p = None, 0.0
+        for trio in combinations(legs, size):
+            odds = float(np.prod([SPORTTIP_FACTOR / t["prob"] for t in trio]))
+            p = float(np.prod([t["prob"] for t in trio]))
+            if lo_odds <= odds <= hi_odds and p > best_p:
+                best, best_p = trio, p
+        if best:
+            chosen = sorted(best, key=lambda t: t["kickoff"])
+            return [{"day": day.isoformat(), "size": size, "legs": chosen, "prob": best_p, "fair_odds": 1 / best_p,
+                     "leg_min": min(t["prob"] for t in chosen), "mini": True, "risky": False, "cat": "mini"}]
+    return []
 
 
 def boost_stats(plan: "DailyPlan", now: datetime | None = None) -> dict:
@@ -1196,15 +1229,15 @@ def carry_top_agents(plan: "DailyPlan", old_top: list[dict]) -> None:
             t["agent"], t["reason"] = o["agent"], o.get("reason", "")
 
 
-def carry_boost(plan: "DailyPlan", old_combos: list[dict]) -> None:
+def carry_boost(plan: "DailyPlan", old_combos: list[dict], attr: str = "boost_combos") -> None:
     """Ohne neuen Agentenlauf: die schon geprüfte Boost-Kombi eines Tages behalten (genau die verschickte,
     mit den Urteilen), statt sie ungeprüft neu zu bauen – sonst kämen ersetzte Spiele zurück."""
     # pro Tag gibt es mehrere Boost-Kombis (eine je Ligen-Gruppe); verschickt wird die erste: alle in
     # ihrer Reihenfolge behalten
     days = {c["day"] for c in old_combos or [] if any(lg.get("agent") for lg in c["legs"])}
     if days:
-        plan.boost_combos = sorted([c for c in plan.boost_combos if c["day"] not in days]
-                                   + [c for c in old_combos if c["day"] in days], key=lambda c: c["day"])
+        setattr(plan, attr, sorted([c for c in getattr(plan, attr) if c["day"] not in days]
+                                   + [c for c in old_combos if c["day"] in days], key=lambda c: c["day"]))
 
 
 def apply_agents(engine: Engine, plan: "DailyPlan", client=None, horizon_h: float = 36.0,
@@ -1366,6 +1399,7 @@ class DailyPlan:
     risky_combos: list[dict] = field(default_factory=list)
     krass_combos: list[dict] = field(default_factory=list)
     boost_combos: list[dict] = field(default_factory=list)
+    mini_combos: list[dict] = field(default_factory=list)  # 3 sehr sichere Tipps, Gesamtquote 2–3
     torfest_combos: list[dict] = field(default_factory=list)
     top: list[dict] = field(default_factory=list)  # bester Tipp pro Spiel (für /top5)
 

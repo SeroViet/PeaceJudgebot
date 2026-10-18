@@ -82,8 +82,8 @@ def _track_top(engine, plan: dict) -> None:
         log.exception("Top-Tipps konnten nicht gemerkt werden")
 
 
-def _track_boost(engine, plan: dict) -> None:
-    """Boost-Kombi merken: nach dem letzten Spiel kommt 🟢/🔴 pro Spiel."""
+def _track_boost(engine, plan: dict, key: str = "boost_combos", name: str = "Boost-Kombi") -> None:
+    """Boost- bzw. Mini-Kombi merken: nach dem letzten Spiel kommt 🟢/🔴 pro Spiel."""
     if engine is None:
         return
     from datetime import datetime
@@ -93,19 +93,20 @@ def _track_boost(engine, plan: dict) -> None:
     try:
         from fussball.service import boost_day
 
-        day = boost_day(plan.get("boost_combos", [])) or datetime.now(state.TZ).date().isoformat()
-        combo = next((c for c in plan.get("boost_combos", []) if c["day"] == day), None)
+        day = boost_day(plan.get(key, [])) or datetime.now(state.TZ).date().isoformat()
+        combo = next((c for c in plan.get(key, []) if c["day"] == day), None)
         if combo:
             # Kombi für einen späteren Tag (heute keine möglich): eigene Meldung, damit sie sich nicht mit
             # der Kombi mischt, die an jenem Tag selbst verschickt wird
             sent = datetime.now(state.TZ).date().isoformat()
-            batch, title = f"boost-{day}", f"📋 <b>Ergebnis Boost-Kombi {day[8:10]}.{day[5:7]}.</b>"
+            prefix = key.split("_")[0]
+            batch, title = f"{prefix}-{day}", f"📋 <b>Ergebnis {name} {day[8:10]}.{day[5:7]}.</b>"
             if day != sent:
                 batch += f"-vom-{sent}"
                 title = title.replace("</b>", f"</b> (verschickt am {sent[8:10]}.{sent[5:7]}.)")
             tracking.track_tips(engine, combo["legs"], day, batch=batch, title=title)
     except Exception:  # noqa: BLE001
-        log.exception("Boost-Kombi konnte nicht gemerkt werden")
+        log.exception("%s konnte nicht gemerkt werden", name)
 
 
 async def _restore_costs(engine) -> None:
@@ -270,6 +271,11 @@ async def _run_daily_locked(engine, loop) -> None:
         await telegram_bot.notify(_bot, boost, share=True)
         _track_boost(engine, plan)
         sent = True
+    mini = telegram_bot.format_mini(plan) if os.getenv("DAILY_MINI", "1") == "1" else ""
+    if mini:  # dazu die Mini-Kombi: 3 sehr sichere Tipps, Gesamtquote 2–3
+        await telegram_bot.notify(_bot, mini, share=True)
+        _track_boost(engine, plan, "mini_combos", "Mini-Kombi")
+        sent = True
     if safe_on() or not boost:  # sichere Tipps nur auf Wunsch – oder als Ersatz, wenn heute keine Boost-Kombi geht
         if not boost:
             await telegram_bot.notify(_bot, "ℹ️ Heute ist keine Boost-Kombi möglich (zu wenige Tipps ab Quote 1.30) "
@@ -279,7 +285,7 @@ async def _run_daily_locked(engine, loop) -> None:
         sent = sent or bool(telegram_bot.top_tips(plan))
     from fussball.agents import runner as _runner
 
-    legs = [lg for c in plan.get("boost_combos", [])[:3] for lg in c["legs"]]
+    legs = [lg for k in ("boost_combos", "mini_combos") for c in plan.get(k, [])[:3] for lg in c["legs"]]
     unchecked = [lg for lg in legs if not (lg.get("agent") or {}).get("assessment")]
     if legs and len(unchecked) == len(legs):  # keine einzige Prüfung: nie still verschweigen
         await telegram_bot.notify(_bot, _runner.error_hint(_runner.LAST_ERROR.get("msg"))
@@ -363,7 +369,7 @@ def due_lineup_checks(plan: dict, now: datetime, minutes: int, already: set[str]
     for t in plan.get("top") or []:  # nur die von beiden Agenten bestätigten sicheren Tipps
         if t.get("agent") == "bestätigt":
             legs.setdefault(t["match_id"], t)
-    for c in plan.get("boost_combos") or []:  # und die Spiele der Boost-Kombi
+    for c in (plan.get("boost_combos") or []) + (plan.get("mini_combos") or []):  # und Boost-/Mini-Kombi
         for leg in c["legs"]:
             if (leg.get("agent") or {}).get("assessment") == "bestätigt":
                 legs.setdefault(leg["match_id"], leg)

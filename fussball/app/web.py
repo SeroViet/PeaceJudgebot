@@ -131,7 +131,9 @@ def create_app(engine=None, start_background: bool = True) -> FastAPI:
                 "boost_note": plan.get("boost_note"),
                 "claude_key": __import__("fussball.agents.scout", fromlist=["key_check"]).key_check(),
                 "boost_verdicts": [(lg.get("agent") or {}).get("assessment") or "ungeprüft"
-                                   for c in plan.get("boost_combos", [])[:1] for lg in c["legs"]]}
+                                   for c in plan.get("boost_combos", [])[:1] for lg in c["legs"]],
+                "mini": [{"day": c["day"], "size": len(c["legs"]), "verdicts": [(lg.get("agent") or {}).get(
+                    "assessment") or "ungeprüft" for lg in c["legs"]]} for c in plan.get("mini_combos", [])[:1]]}
 
     @app.get("/robots.txt", response_class=PlainTextResponse)
     def robots():

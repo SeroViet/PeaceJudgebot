@@ -46,6 +46,14 @@ boost_combo:
   min_prob: 0.60   # nicht viel Risiko: jeder Tipp mind. 60 % (≈ Quote bis ca. 1.55)
   max_prob: 0.71   # ≈ Sporttip-Quote ab 1.30 (KombiBoost von Sporttip erst ab 1.50 pro Tipp)
 
+# Mini-Kombi: genau 3 sehr sichere Tipps (verschiedene Spiele), Sporttip-Gesamtquote 2–3
+mini_combo:
+  size: 3
+  min_odds: 2.0
+  max_odds: 3.0
+  min_prob: 0.62   # einzelner Tipp höchstens ca. Quote 1.50
+  max_prob: 0.85
+
 # Torfest-Kombi: "1. Halbzeit Über 1.5" in den torreichsten Spielen (ab 2.9 erwarteten Toren)
 torfest_combo:
   size: 3

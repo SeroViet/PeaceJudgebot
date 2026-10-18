@@ -364,7 +364,7 @@ def test_boost_is_plain_kombi_without_system():
     combo = {"day": day.date().isoformat(), "size": 6, "legs": legs, "prob": 0.65 ** 6, "boost": True,
              "cat": "gemischt", "id": "B1"}
     text = telegram_bot.format_boost({"boost_combos": [combo]})
-    assert "6 Tipps, jeder ab Quote ca. 1.30" in text and "normale Kombi" in text
+    assert "8 Tipps, jeder ab Quote ca. 1.30" in text and "normale Kombi" in text
     assert "System" not in text.replace("keine Systemwette", "") and "Reihe" not in text
 
 
@@ -483,3 +483,22 @@ def test_odds_credits_go_to_odds_not_scores(engine, monkeypatch):
     monkeypatch.setattr(service, "daily_allowance", lambda remaining, spent: 6)
     out = service.world_scan(engine)
     assert list(out["fetched"]) == ["EPL", "La Liga", "Serie A"] and not out["scores"]  # 3 Ligen statt 1
+
+
+def test_boost_fills_up_to_8_games():
+    from datetime import datetime, timedelta
+
+    from fussball import service
+    from fussball.service import MatchForecast
+
+    now = datetime(2026, 10, 18, 8, 0)
+    mk = lambda i, p: MatchForecast(i, "soccer_switzerland_superleague", "Super League",  # noqa: E731
+                                    now + timedelta(hours=4, minutes=5 * i), f"H{i}", f"A{i}", 1.6, 1.3, {}, {}, {},
+                                    None, None, 0.0, {}, implied={"OU2.5": {"O": p, "U": 1 - p}})
+    bc = {"size": 8, "min_prob": 0.60, "max_prob": 0.71}
+    pool = [mk(i, 0.64) for i in range(6)] + [mk(10 + i, 0.52) for i in range(3)]
+    (combo,) = service.boost_fallback(pool, [], bc, now=now)
+    assert combo["size"] == 8  # 6 sichere + 2 etwas mutigere, statt nur 6
+    assert sum(lg["prob"] < 0.60 for lg in combo["legs"]) == 2
+    (combo,) = service.boost_fallback(pool[:6], [], bc, now=now)
+    assert combo["size"] == 6 and min(lg["prob"] for lg in combo["legs"]) >= 0.60  # nicht unnötig senken

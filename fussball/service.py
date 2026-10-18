@@ -302,8 +302,9 @@ def month_reserve_ok(remaining: int | None, cost: int = 2, today=None, per_day: 
 
 # Reihenfolge, in der Quoten geholt werden (Rest danach, nach Anzahl Spiele)
 _PRIORITY = ("nations_league", "world_cup_qualifiers_europe", "euro_qual", "uefa_european", "fifa_world_cup",
-             "champs_league", "europa_league", "conference_league", "epl", "germany_bundesliga", "spain_la_liga",
-             "italy_serie_a", "france_ligue_one", "switzerland", "netherlands", "portugal", "austria", "efl_champ",
+             "champs_league", "europa_league", "conference_league", "switzerland", "epl", "germany_bundesliga",
+             "spain_la_liga", "italy_serie_a", "france_ligue_one", "dfb_pokal", "fa_cup", "copa_del_rey",
+             "coppa_italia", "coupe_de_france", "netherlands", "portugal", "austria", "efl_champ",
              "brazil_campeonato", "germany_bundesliga2", "belgium", "turkey", "spl", "denmark", "italy_serie_b",
              "spain_segunda", "ligue_two", "brazil_serie_b")
 
@@ -1053,8 +1054,8 @@ def boost_day(combos: list[dict], now: datetime | None = None) -> str | None:
 
 def boost_fallback(pool: list[MatchForecast], combos: list[dict], bc: dict, skip: set[int] | None = None,
                    now: datetime | None = None) -> list[dict]:
-    """Die Boost-Kombi muss es jeden Tag geben. Reicht ein Wettbewerb allein nicht für 6 Tipps ab Quote 1.30,
-    wird gemischt (alle Ligen), die Chance pro Tipp etwas tiefer erlaubt (bis 50 %) und notfalls auf 4 bzw. 3 Tipps
+    """Die Boost-Kombi muss es jeden Tag geben. Reicht ein Wettbewerb allein nicht für 8 Tipps ab Quote 1.30,
+    wird gemischt (alle Ligen), die Chance pro Tipp etwas tiefer erlaubt (bis 45 %) und erst ganz zum Schluss auf 7 … 3 Tipps
     verkürzt; gibt es heute gar nichts mehr, kommt die Kombi für morgen."""
     from fussball.app.state import local
 
@@ -1065,18 +1066,23 @@ def boost_fallback(pool: list[MatchForecast], combos: list[dict], bc: dict, skip
     size = bc.get("size", 5)
     pool = [f for f in pool if f.match_id not in (skip or set())]
     for day in (today, today + timedelta(days=1)):
-        for lo in (bc.get("min_prob", 0.60), 0.55, 0.50):
+        best: list[dict] = []
+        for lo in (bc.get("min_prob", 0.60), 0.55, 0.50, 0.45):
             legs = [t for t in best_tip_per_match(pool, lo, bc.get("max_prob", 0.62), BOOST_MARKETS,
                                                   exclude=RISKY_EXCLUDED)
                     if local(t["kickoff"]).date() == day and datetime.fromisoformat(t["kickoff"]) > now]
-            legs.sort(key=lambda t: -t["prob"])
-            for n in dict.fromkeys((size, 5, 4, 3)):  # 6 → 5 → 4 → 3 Tipps
-                if len(legs) >= n:
-                    chosen = sorted(_varied(legs, n), key=lambda t: t["kickoff"])
-                    prob = float(np.prod([t["prob"] for t in chosen]))
-                    return [{"day": day.isoformat(), "size": n, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
-                             "leg_min": min(t["prob"] for t in chosen), "boost": True, "risky": False,
-                             "cat": "gemischt"}]
+            if len(legs) > len(best):  # tiefere Chance pro Tipp nur, wenn es dadurch mehr Spiele werden
+                best = legs
+            if len(best) >= size:
+                break
+        best.sort(key=lambda t: -t["prob"])
+        for n in dict.fromkeys((size, 7, 6, 5, 4, 3)):  # 8 → 7 → … → 3 Tipps
+            if len(best) >= n:
+                chosen = sorted(_varied(best, n), key=lambda t: t["kickoff"])
+                prob = float(np.prod([t["prob"] for t in chosen]))
+                return [{"day": day.isoformat(), "size": n, "legs": chosen, "prob": prob, "fair_odds": 1 / prob,
+                         "leg_min": min(t["prob"] for t in chosen), "boost": True, "risky": False,
+                         "cat": "gemischt"}]
     return []
 
 

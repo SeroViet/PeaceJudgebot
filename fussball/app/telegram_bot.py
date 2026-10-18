@@ -418,7 +418,7 @@ TORFEST_BT = ("Nur die torreichsten Spiele. Im Test mit 2003 torreichen Spielen:
 
 
 def format_boost(plan: dict, key: str = "boost_combos",
-                 title: str = "🚀 <b>Boost-Kombi heute</b> (6 Tipps, jeder ab Quote ca. 1.30)") -> str:
+                 title: str = "🚀 <b>Boost-Kombi heute</b> (8 Tipps, jeder ab Quote ca. 1.30)") -> str:
     """Kurz: Boost- bzw. Torfest-Kombis von heute, eine Zeile pro Spiel."""
     from datetime import datetime
 
@@ -632,11 +632,11 @@ def format_stats(engine) -> str:
 
 
 COMMANDS = [
-    ("boost", "Boost-Kombi von heute (6 Tipps ab Quote 1.30)"),
+    ("boost", "Boost-Kombi von heute (8 Tipps ab Quote 1.30)"),
     ("top5", "Die 5–6 sichersten Tipps von heute, vom Scout geprüft"),
     ("tageskombi", "Sichere 3er- und 5er-Kombi, alle Spiele am selben Tag"),
     ("ergebnisse", "Bilanz + letzte Tipps: 🟢 gewonnen / 🔴 verloren"),
-    ("jetzt", "Agenten jetzt prüfen lassen und 6 Tipps schicken"),
+    ("jetzt", "Agenten jetzt prüfen lassen und die Boost-Kombi schicken"),
     ("status", "Laufen die Agenten? Geprüft, gestrichen, Fehler"),
     ("sag", "Nachricht an deine Freunde: /sag Hallo"),
     ("kosten", "Claude-Kosten heute"),
@@ -693,7 +693,7 @@ def build(engine) -> Application | None:
             return
         await reply(update, "👋 PeaceJudge ist bereit.\n/top5 – die sichersten Tipps von heute\n/kombi – Kombis\n/spiel Team – Prognose\n"
                             "/tageskombi – 3er- und 5er-Kombi, alle Spiele am selben Tag\n"
-                            "/boost – Boost-Kombi: 6 Tipps ab Quote 1.30\n"
+                            "/boost – Boost-Kombi: 8 Tipps ab Quote 1.30\n"
                             "/torfest – 1. Halbzeit Über 1.5 in den torreichsten Spielen\n"
                             "/risiko – Risiko-Kombi: 2 BetBuilder, Quote ca. 4–8\n"
                             "/krass – Krass-Kombi: 3 BetBuilder, Quote ca. 8–25\n"
